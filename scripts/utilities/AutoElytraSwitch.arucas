@@ -1,0 +1,87 @@
+client = MinecraftClient.getClient();
+player = Player.get();
+
+elytraswitch = true;
+
+eSwitchMap = {
+    "name": "autoElytra",
+    "subcommands": {
+        "enable": {
+            "": fun() {
+                elytraswitch = true;
+                text = Text.of("Auto elytra switch enabled");
+                player.message(text.format("DARK_GREEN"));
+            }
+        },
+        "disable": {
+            "": fun() {
+                elytraswitch = false;
+                text = Text.of("Auto elytra switch disabled");
+                player.message(text.format("DARK_RED"));
+            }
+        },
+        "help" : {
+            "" : fun() {
+                text = "\n Pressing jump key while in air(not while gliding/in creative mode) will switch elytra and chestplate in your inventory.\n The script is turned on by default.";
+                text = Text.of(text);
+                player.message(text.format("GOLD"));
+            }
+        },
+        "credits" : {
+            "": fun() {
+                text = "\n Plusls: Original idea.\n Sensei: Making the mod (& giving the working script). \n HardCoded: Awesome IntelliJ Plugin. \n Surf: Pasting other's work into a single .arucas file";
+                text = Text.of(text);
+                player.message(text.format("DARK_AQUA"));
+            }
+        }
+    },
+    "arguments" : { }
+};
+
+fun findFirstSlot(items, player) {
+    slots = [];
+    foreach (item : items){
+        item = Material.of(item).asItemStack();
+        slots.concat(player.getAllSlotsFor(item));
+    }
+    if (slots.isEmpty()) {
+        return null;
+    }
+    return slots.get(0);
+}
+
+onSpacePress= new GameEvent("onKeyPress", fun(key) {
+    player = Player.get();
+    if (key == "space" && !player.isOnGround()) {
+        isWearingElytra = player.getItemForPlayerSlot(6).getId() == "elytra";
+        if (!isWearingElytra){
+            elytraSlot = findFirstSlot(["elytra"],player);
+            if (elytraSlot != null) {
+                player.swapSlots(elytraSlot, 6);
+            }
+        }
+    }
+});
+
+onTickEvent = new GameEvent("onClientTick", fun() {
+    player=Player.get();
+    if (player.getGamemode() != "survival" || !elytraswitch || player.getCurrentScreen() != null) {
+        return;
+    }
+    isWearingElytra = player.getItemForSlot(6).getId() == "elytra";
+    if ((player.isOnGround() && isWearingElytra) || player.isInLava() ) {
+        chestplateSlot = findFirstSlot(["diamond_chestplate", "netherite_chestplate"], player);
+        if (chestplateSlot == null) {
+            return;
+        }
+        player.swapSlots(chestplateSlot, 6);
+        sleep(50);
+    }
+});
+
+onTickEvent.register();
+onSpacePress.register();
+
+eSwitchCommand= CommandBuilder.fromMap(eSwitchMap);
+client.addCommand(eSwitchCommand);
+hold();

@@ -1,0 +1,31 @@
+client = MinecraftClient.getClient();
+
+foods = [
+    Material.COOKED_BEEF,
+    Material.COOKED_PORKCHOP,
+    Material.GOLDEN_CARROT
+];
+
+fun tryToEat(player) {
+    foodSlot = 45;
+    if (!foods.contains(player.getItemForSlot(foodSlot).getMaterial())) {
+        foreach (food : foods) {
+            foodSlot = player.getSlotFor(food.asItemStack());
+            if (foodSlot != null) break;
+        }
+    }
+    if (foodSlot == null) return;
+    if (foodSlot != 45) player.swapSlots(foodSlot, 45);
+    sleep(50);
+    player.use("hold");
+    while (player.getHunger() < 20 && foods.contains(player.getItemForSlot(45).getMaterial())) sleep(50);
+    player.use("stop");
+    if (foodSlot != 45) player.swapSlots(foodSlot, 45);
+    return;
+}
+
+while (true) {
+    player = Player.get();
+    if (player.getHunger() < 20) tryToEat(player);
+    sleep(50);
+}

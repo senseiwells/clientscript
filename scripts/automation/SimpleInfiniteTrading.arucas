@@ -1,0 +1,75 @@
+// Map of wanted items and any enchantments they have
+wantedItems = {
+    Material.ENCHANTED_BOOK: {
+        "feather_falling" : 2
+    },
+    Material.GLASS : { },
+    Material.BOOKSHELF : { }
+};
+
+fun tradeWithVillager(player, villager) {
+    player.interactWithEntity(villager);
+    // We wait until we are no longer looking at the villager
+    while (true) {
+        entity = player.getLookingAtEntity();
+        if (entity == null || entity.getId() != "villager") {
+            break;
+        }
+        sleep(50);
+    }
+    // You may need to ajust this based on your setup
+    sleep(400);
+    currentScreen = player.getCurrentScreen();
+    if (!currentScreen.instanceOf("MerchantScreen")) {
+        return;
+    }
+    tradeList = currentScreen.getTradeList();
+    for (i = 0; i < len(tradeList); i++) {
+        trade = tradeList.get(i);
+        // Checks if trade is disabled
+        if (trade.getUses() >= trade.getMaxUses()) {
+            continue;
+        }
+        sellItem = trade.getSellItem();
+        sellItemEnchants = sellItem.getEnchantments();
+        foreach (material : wantedItems.getKeys()) {
+            if (sellItem.getMaterial() != material) {
+                continue;
+            }
+            isMatch = true;
+            materialEnchants = wantedItems.get(material);
+            foreach (enchant : materialEnchants.getKeys()) {
+                // Compares enchantments
+                if (sellItemEnchants.get(enchant) != materialEnchants.get(enchant)) {
+                    isMatch = false;
+                    break;
+                }
+            }
+            if (!isMatch) {
+                continue;
+            }
+            // We trade until we can't
+            for (j = 0; trade.getUses() < trade.getMaxUses(); j++) {
+                if (j > 100) {
+                    // You could maybe add a check to see if the player
+                    // still has the required items to do the trade
+                    print("Tried to trade too many times");
+                    stop();
+                }
+                currentScreen.tradeIndex(i);
+                sleep(50);
+            }
+            sleep(50);
+            player.dropAll(material.asItemStack());
+        }
+    }
+}
+
+while (true) {
+    player = Player.get();
+    entity = player.getLookingAtEntity();
+    if (entity != null && entity.getId() == "villager") {
+        tradeWithVillager(player, entity);
+    }
+    sleep(50);
+}

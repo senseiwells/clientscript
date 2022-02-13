@@ -1,0 +1,36 @@
+fun swapCurrentPlayerSlot(toSlot) {
+    player = Player.get();
+    player.clickSlot(36 + player.getCurrentSlot(), toSlot, "swap");
+}
+
+hatCommandMap = {
+    "name" : "armourSlotAbuse",
+    "subcommands" : {
+        "helmet" : {
+            "" : fun() {
+                swapCurrentPlayerSlot(39);
+            }
+        },
+        "chestplate" : {
+            "" : fun() {
+                swapCurrentPlayerSlot(38);
+            }
+        },
+        "leggings" : {
+            "" : fun() {
+                swapCurrentPlayerSlot(37);
+            }
+        },
+        "boots" : {
+            "" : fun() {
+                swapCurrentPlayerSlot(36);
+            }
+        }
+    },
+    "arguments" : { }
+};
+
+client = MinecraftClient.getClient();
+client.addCommand(CommandBuilder.fromMap(hatCommandMap));
+
+hold();

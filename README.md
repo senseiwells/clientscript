@@ -7,4 +7,4 @@ These scripts can be directly downloaded in Minecraft using [EssentialClient](ht
 All the documentation for ClientScript can be found on the EssentialClient wiki [here](https://github.com/senseiwells/EssentialClient/wiki/ClientScript)
 
 ## Editor Support
-[Intellij IDEA plugin (coming soon)]()
+[Intellij IDEA plugin](https://github.com/Kariaro/ArucasHighlighter/releases)
