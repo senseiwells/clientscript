@@ -1,0 +1,166 @@
+class SingleBoxManager {
+    var boxes = { };
+
+    fun clearBoxes() {
+        foreach (box : this.boxes.getValues()) {
+            box.stopRendering();
+        }
+        this.boxes.clear();
+    }
+
+    fun addPosition(x, y, z) {
+        boxPos = new Pos(x, y, z);
+        if (!this.boxes.getKeys().contains(boxPos)) {
+            box = new BoxShape(boxPos);
+            box.setOutlinePixelWidth(0);
+            box.setOpacity(50);
+            box.setColour(255, 0, 0);
+            box.setRenderThroughBlocks(true);
+            box.render();
+            this.boxes.put(boxPos, box);
+        }
+    }
+
+    fun removePosition(x, y, z) {
+        boxPos = new Pos(x, y, z);
+        box = this.boxes.remove(boxPos);
+        if (box != null) {
+            box.stopRendering();
+        }
+    }
+
+    fun size() {
+        return len(this.boxes);
+    }
+}
+
+client = MinecraftClient.getClient();
+boxManager = new SingleBoxManager();
+continuous = false;
+currentRadius = 0;
+fromY = 0;
+toY = 64;
+// Dummy assignment
+findSpawnableAround = null;
+
+fun findSpawnablePlayer(radius) {
+    findSpawnableAround(Player.get().getPos(), radius);
+}
+
+fun findSpawnableAround(pos, radius) {
+    if (radius == 0) {
+        return;
+    }
+    world = client.getWorld();
+    x = pos.getX().floor();
+    z = pos.getZ().floor();
+    for (i = x - radius; i <= x + radius; i++) {
+        for (j = fromY; j <= toY; j++) {
+            for (k = z - radius; k <= z + radius; k++) {
+                block = world.getBlockAt(i, j, k);
+                blockMaterial = block.getMaterial();
+                if (
+                // This Air check isn't needed but it will drastically
+                // speed up any areas that are mostly air
+                blockMaterial != Material.AIR && blockMaterial != Material.BEDROCK &&
+                block.isSideSolidFullSquare("up") && !block.isTransparent() &&
+                world.getBlockAt(i, j + 1, k).getId() == "air" &&
+                world.getBlockAt(i, j + 2, k).getId() == "air"
+                ) {
+                    boxManager.addPosition(i, j, k);
+                }
+                else {
+                    boxManager.removePosition(i, j, k);
+                }
+            }
+        }
+    }
+}
+
+commandSpawnable = {
+    "name" : "highlightspawnable",
+    "subcommands" : {
+        "radius" : {
+            "<radius>" : {
+                "" : fun(radius) {
+                    currentRadius = radius;
+                }
+            }
+        },
+        "height" : {
+            "<from>" : {
+                "<to>" : {
+                    "" : fun(from, to) {
+                        fromY = from;
+                        toY = to;
+                    }
+                }
+            }
+        },
+        "scan" : {
+            "<scanradius>" : {
+                "" : fun(radius) {
+                    if (radius > 32) {
+                        print("Scanning with over radius 32 will take some time...");
+                    }
+                    print("Started scanning");
+                    findSpawnablePlayer(radius);
+                    print("Finished scanning");
+                }
+            }
+        },
+        "count" : {
+            "" : fun() {
+                print("Current number of hightlighted blocks: " + boxManager.size());
+            }
+        },
+        "clear" : {
+            "" : fun() {
+                boxManager.clearBoxes();
+            }
+        }
+    },
+    "arguments" : {
+        "radius" : {
+            "type" : "Integer",
+            "suggests" : [10, 32],
+            "min" : 1,
+            "max" : 32
+        },
+        "scanradius" : {
+            "type" : "Integer",
+            "suggests" : [10, 32, 64, 128],
+            "min" : 1,
+            "max" : 256
+        },
+        "bool" : {
+            "type" : "Boolean"
+        },
+        "from" : {
+            "type" : "Integer",
+            "min" : -64,
+            "max" : 319,
+            "suggests" : [0, -64]
+        },
+        "to" : {
+            "type" : "Integer",
+            "min" : -64,
+            "max" : 319,
+            "suggests" : [64, 128]
+        }
+    }
+};
+
+client.addCommand(CommandBuilder.fromMap(commandSpawnable));
+
+new GameEvent("onBlockBroken", fun(block) {
+    findSpawnableAround(block.getPos(), 1);
+}).register();
+new GameEvent("onInteractBlock", fun(block, item) {
+    findSpawnableAround(block.getPos(), 1);
+}).register();
+
+while (true) {
+    findSpawnablePlayer(currentRadius);
+    sleep(1000);
+}
