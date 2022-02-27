@@ -3261,12 +3261,12 @@ This will be used for all examples:
 block = Block.of(Material.GRASS_BLOCK);
 ```
 
-### `<Block>.getBlockId()`
+### `<Block>.getId()`
 
 - This gets the block id (name) of the Block
 - Returns - String: the id of the Block
 	- Example: `"grass_block"`, `"diamond_block"`
-- Example: `block.getBlockId();`
+- Example: `block.getId();`
 
 ### `<Block>.isBlockEntity()`
 
