@@ -1,0 +1,106 @@
+client = MinecraftClient.getClient();
+
+// Change where you want data stored using this
+hotKeyDirectory = new File(client.getScriptsPath() + "/KeyToCommand Data");
+hotKeyDirectory.createDirectory();
+hotKeyFile = new File(client.getScriptsPath() + "/KeyToCommand Data/KeyToCommand.json");
+hotKeyMap = { };
+
+kDebug = false;
+
+if (!hotKeyFile.exists()) {
+    hotKeyData = Json.fromMap(hotKeyMap);
+    hotKeyData.writeToFile(hotKeyFile);
+}
+else {
+    hotKeyJson = Json.fromString(hotKeyFile.read());
+    hotKeyMap = hotKeyJson.getValue();
+}
+
+cmdMap = {
+    "name" : "keyToCommand",
+    "subcommands" : {
+        "add" : {
+            "<key> <command>" : {
+                "" : fun(key, command) {
+                    hotKeyMap.put(key,command);
+                    hotKeyData = Json.fromMap(hotKeyMap);
+                    hotKeyData.writeToFile(hotKeyFile);
+                    text = "Hotkey & Command Registered.";
+                    text = Text.of(text);
+                    Player.get().message(text.format("DARK_GREEN"));
+                }
+            }
+        },
+        "kDebug" : {
+            "" : fun() {
+                if (!kDebug) {
+                    kDebug = true;
+                    text = "KeyToCommand Debug mode set true.";
+                    text = Text.of(text);
+                    Player.get().message(text.format("GREEN"));
+                }
+                else {
+                    kDebug = false;
+                    text = "KeyToCommand Debug mode set false.";
+                    text = Text.of(text);
+                    Player.get().message(text.format("RED"));
+                }
+            }
+        },
+        "credits" : {
+            "" : fun() {
+                text = "Sensei: Helping a lotttt with the file & Json stuff. \n Surf: Making an originalish script.";
+                text = Text.of(text);
+                Player.get().message(text.format("DARK_AQUA"));
+            }
+        },
+        "help" : {
+            "" : fun() {
+                text = "Hotkey subcommand takes in 2 values, key and the command.\n The key has to be a word, i.e it can not have letters and also not all keys are valid. \n The command input takes in a greedy string, i.e everything u type including spaces will be taken into consideration.\n\n FOr finding the 'correct keycode'. Please use kDebug command. Which acts as a toggle.\n After sucessfully registering the command, you can start using it.";
+                text = Text.of(text);
+                Player.get().message(text.format("GOLD"));
+            }
+        },
+        "delete" : {
+            "<key>" : {
+                "" : fun(key) {
+                    hotKeyFile.delete();
+                    hotKeyMap.remove(key);
+                    hotKeyData = Json.fromMap(hotKeyMap);
+                    hotKeyData.writeToFile(hotKeyFile);
+                }
+            }
+        }
+    },
+    "arguments" : {
+        "key" : { "type" : "Word" },
+        "command" : { "type" : "GreedyString" }
+    }
+};
+
+cmd = CommandBuilder.fromMap(cmdMap);
+client.addCommand(cmd);
+
+hotKeyEvent = new GameEvent("onKeyPress", fun(key) {
+    player = Player.get();
+    if (player.getCurrentScreen() != null){
+        return;
+    }
+
+    if (!kDebug) {
+        for (i = 0; i < len(hotKeyMap); i++) {
+            keyA = hotKeyMap.getKeys().get(i);
+            if (key == keyA) {
+                player.say(hotKeyMap.get(keyA));
+            }
+        }
+    }
+    else {
+        player.message("Key Pressed:" + key);
+    }
+});
+
+hotKeyEvent.register();
+
+hold();
