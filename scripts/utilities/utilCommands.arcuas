@@ -1,0 +1,107 @@
+client = MinecraftClient.getClient();
+me = client.getPlayer();
+
+Entities = CommandBuilder.literal("entities");
+Entities.executes(fun(){
+    allEntities = client.getWorld().getAllEntities();
+    entityCount = {};
+
+    foreach (entity : allEntities) {
+        /*
+        box = new BoxShape(entity.getPos());
+        box.setOpacity(100);
+        box.setRenderThroughBlocks(true);
+        box.render();
+        */
+
+        if (!entityCount.getKeys().contains(entity.getId())){
+            entityCount.put(entity.getId(),1);
+
+        }
+        else{
+            count = entityCount.get(entity.getId())+1;
+            entityCount.put(entity.getId(),count);
+        }
+
+    }
+    me.message(entityCount);
+
+});
+
+client.addCommand(Entities);
+
+listToString = null;
+
+fun mapToString(map){
+    string = "{";
+    keys = map.getKeys();
+    foreach(key : keys)
+    {
+        string = string + key;
+        string = string + ": ";
+        if(map.get(key).getValueType()=="Map"){
+            string = string + mapToString(map.get(key));
+        }
+        else if(map.get(key).getValueType()=="List"){
+            string = string + listToString(map.get(key));
+        }
+        else string = string + map.get(key);
+
+        string = string + ", ";
+    }
+    string = string +"}";
+    return string;
+}
+
+fun listToString(List){
+    string = "[";
+    foreach(item : List){
+        if(item.getValueType()=="Map"){
+            string = string + mapToString(item);
+        }
+        else if(item.getValueType()=="List"){
+            string = string + listToString(item);
+        }
+        else string = string + item;
+
+        string = string + ", ";
+    }
+    string = string+ "]";
+    return string;
+}
+
+
+nbt = CommandBuilder.literal("nbt");
+nbt.executes(fun(){
+    me.message(mapToString(me.getHeldItem().getNbt()));
+});
+client.addCommand(nbt);
+
+
+
+
+pos = CommandBuilder.literal("pos");
+pos.executes(fun(){
+    switch(me.getDimension()){
+        case "overworld" ->{
+            me.message("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
+            x = me.getX()/8;
+            y = me.getY()/8;
+            z = me.getZ()/8;
+            me.message("Neather coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+        }
+        case "the_neather" ->{
+            me.message("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
+            x = me.getX()*8;
+            y = me.getY()*8;
+            z = me.getZ()*8;
+            me.message("Overworld coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+        }
+        case "the_end" ->{
+            me.message("Current coordinates: "+me.getPos());
+        }
+    }
+});
+client.addCommand(pos);
+
+hold();
