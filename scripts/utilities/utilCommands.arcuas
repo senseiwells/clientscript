@@ -24,7 +24,7 @@ Entities.executes(fun(){
         }
 
     }
-    me.message(entityCount);
+    print(entityCount);
 
 });
 
@@ -73,7 +73,7 @@ fun listToString(List){
 
 nbt = CommandBuilder.literal("nbt");
 nbt.executes(fun(){
-    me.message(mapToString(me.getHeldItem().getNbt()));
+    print(mapToString(me.getHeldItem().getNbt()));
 });
 client.addCommand(nbt);
 
@@ -84,21 +84,21 @@ pos = CommandBuilder.literal("pos");
 pos.executes(fun(){
     switch(me.getDimension()){
         case "overworld" ->{
-            me.message("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
+            print("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
             x = me.getX()/8;
             y = me.getY()/8;
             z = me.getZ()/8;
-            me.message("Neather coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+            print("Nether coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
         }
-        case "the_neather" ->{
-            me.message("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
+        case "the_nether" ->{
+            print("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
             x = me.getX()*8;
             y = me.getY()*8;
             z = me.getZ()*8;
-            me.message("Overworld coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+            print("Overworld coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
         }
         case "the_end" ->{
-            me.message("Current coordinates: "+me.getPos());
+            print("Current coordinates: "+me.getPos());
         }
     }
 });
