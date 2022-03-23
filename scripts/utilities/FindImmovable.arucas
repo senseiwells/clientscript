@@ -1,0 +1,139 @@
+class SingleBoxManager {
+    var boxes = { };
+
+    fun clearBoxes() {
+        foreach (box : this.boxes.getValues()) {
+            box.stopRendering();
+        }
+        this.boxes.clear();
+    }
+
+    fun addPosition(x, y, z) {
+        boxPos = new Pos(x, y, z);
+        if (!this.boxes.getKeys().contains(boxPos)) {
+            box = new BoxShape(boxPos);
+            box.setOutlinePixelWidth(0);
+            box.setOpacity(50);
+            box.setRenderThroughBlocks(true);
+            box.render();
+            this.boxes.put(boxPos, box);
+        }
+    }
+
+    fun removePosition(x, y, z) {
+        boxPos = new Pos(x, y, z);
+        box = this.boxes.remove(boxPos);
+        if (box != null) {
+            box.stopRendering();
+        }
+    }
+}
+
+client = MinecraftClient.getClient();
+boxManager = new SingleBoxManager();
+
+immovables = [Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR]
+shouldRun = false;
+searchRadius = 64;
+fromY = 0;
+toY = 64;
+
+fun findObsidian() {
+    player = Player.get();
+    world = client.getWorld();
+    x = player.getX().floor();
+    y = player.getY().floor();
+    z = player.getZ().floor();
+    for (i = x - searchRadius; i < x + searchRadius; i++) {
+        for (j = fromY; j < toY; j++) {
+            for (h = z - searchRadius; h < z + searchRadius; h++) {
+                block = world.getBlockAt(i, j, h);
+                if (immovables.contains(block.getMaterial())) {
+                    boxManager.addPosition(i, j, h);
+                }
+                else {
+                    boxManager.removePosition(i, j, h);
+                }
+            }
+        }
+    }
+}
+
+findImmovableCommand = {
+    "name" : "findImmovable",
+    "subcommands" : {
+        "find" : {
+            "" : findObsidian,
+            "start" : {
+                "" : fun() {
+                    print("Started searching for immovable blocks");
+                    shouldRun = true;
+                }
+            },
+            "stop" : {
+                "" : fun() {
+                    print("Stopped searching for immovable blocks");
+                    shouldRun = false;
+                }
+            }
+        },
+        "clear" : {
+            "" : fun() {
+                boxManager.clearBoxes();
+            }
+        },
+        "radius <radius>" : {
+            "" : fun(radius) {
+                if (radius > 128) {
+                    print("Warning radius of over 128 will take a long time!");
+                }
+                searchRadius = radius;
+            }
+        },
+        "height <from> <to>" : {
+            "" : fun(from, to) {
+                fromY = from;
+                toY = to;
+            }
+        }
+    },
+    "arguments" : {
+        "radius" : {
+            "type" : "Integer",
+            "min" : 1,
+            "max" : 512,
+            "suggests" : [64, 128, 256]
+        },
+        "from" : {
+            "type" : "Integer",
+            "min" : -64,
+            "max" : 319,
+            "suggests" : [0, -64]
+        },
+        "to" : {
+            "type" : "Integer",
+            "min" : -64,
+            "max" : 319,
+            "suggests" : [64, 128]
+        }
+    }
+};
+
+client.addCommand(CommandBuilder.fromMap(findImmovableCommand));
+
+blockBreakEvent = new GameEvent("onBlockBroken", fun(block) {
+    if (immovable.contains(block.getMaterial())) {
+        boxManager.removePosition(block.getX(), block.getY(), block.getZ());
+    }
+});
+
+blockBreakEvent.register();
+
+while (true) {
+    if (shouldRun) {
+        findObsidian();
+    }
+    sleep(1000);
+}
+
+hold();
