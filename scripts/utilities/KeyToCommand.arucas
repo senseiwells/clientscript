@@ -50,14 +50,14 @@ cmdMap = {
         },
         "credits" : {
             "" : fun() {
-                text = "Sensei: Helping a lotttt with the file & Json stuff. \n Surf: Making an originalish script.";
+                text = "Sensei: Helping a lot with the file & Json stuff. \n Surf: Making an original-ish script.";
                 text = Text.of(text);
                 Player.get().message(text.format("DARK_AQUA"));
             }
         },
         "help" : {
             "" : fun() {
-                text = "Hotkey subcommand takes in 2 values, key and the command.\n The key has to be a word, i.e it can not have letters and also not all keys are valid. \n The command input takes in a greedy string, i.e everything u type including spaces will be taken into consideration.\n\n FOr finding the 'correct keycode'. Please use kDebug command. Which acts as a toggle.\n After sucessfully registering the command, you can start using it.";
+                text = "The main/parent command is keytocommand.\n For adding a new combination, please use: \n/keytocommand [Key Name] [Command/Message (/ included)] \n For removing a key, please use:\n /keytocommand [Key Name] \n To figure out the key names, please use:\n /keytocommand kDebug \n Gentle remainder, you can have multiple commands/messages being sent with same key if needed.";
                 text = Text.of(text);
                 Player.get().message(text.format("GOLD"));
             }
@@ -97,7 +97,7 @@ hotKeyEvent = new GameEvent("onKeyPress", fun(key) {
         }
     }
     else {
-        player.message("Key Pressed:" + key);
+        player.messageActionBar("Key Pressed: "+key);
     }
 });
 
