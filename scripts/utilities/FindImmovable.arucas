@@ -1,6 +1,8 @@
+// Single box manager class allows us to abstract the highlighting process
 class SingleBoxManager {
     var boxes = { };
 
+    // Removes all boxes from rendering
     fun clearBoxes() {
         foreach (box : this.boxes.getValues()) {
             box.stopRendering();
@@ -8,6 +10,8 @@ class SingleBoxManager {
         this.boxes.clear();
     }
 
+
+    // Adds a position for a box to render
     fun addPosition(x, y, z) {
         boxPos = new Pos(x, y, z);
         if (!this.boxes.getKeys().contains(boxPos)) {
@@ -20,6 +24,7 @@ class SingleBoxManager {
         }
     }
 
+    // Removes a position for a box to render
     fun removePosition(x, y, z) {
         boxPos = new Pos(x, y, z);
         box = this.boxes.remove(boxPos);
@@ -32,21 +37,29 @@ class SingleBoxManager {
 client = MinecraftClient.getClient();
 boxManager = new SingleBoxManager();
 
+// List of immovable blocks
 immovables = [Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR]
 shouldRun = false;
 searchRadius = 64;
 fromY = 0;
 toY = 64;
 
+// Main function that is used to find obsidian
 fun findObsidian() {
     player = Player.get();
     world = client.getWorld();
     x = player.getX().floor();
     y = player.getY().floor();
     z = player.getZ().floor();
+    // Basically scanning every single block in a set radius
+    // This is slow and you could run this on multiple threads
+    // to maybe speed it up a little, but I don't think it really matters...
     for (i = x - searchRadius; i < x + searchRadius; i++) {
         for (j = fromY; j < toY; j++) {
             for (h = z - searchRadius; h < z + searchRadius; h++) {
+                // If the block is non movable then we set it to be highlighted
+                // Otherwise we set it to not highlight, this is done to remove 
+                // any that were previously highlighted
                 block = world.getBlockAt(i, j, h);
                 if (immovables.contains(block.getMaterial())) {
                     boxManager.addPosition(i, j, h);
@@ -101,11 +114,13 @@ findImmovableCommand = {
         "radius" : {
             "type" : "Integer",
             "min" : 1,
+            // Radius over 512 will take forever so we limit it
             "max" : 512,
             "suggests" : [64, 128, 256]
         },
         "from" : {
             "type" : "Integer",
+            // -64 and 319 for 1.18+ compat
             "min" : -64,
             "max" : 319,
             "suggests" : [0, -64]
@@ -121,6 +136,8 @@ findImmovableCommand = {
 
 client.addCommand(CommandBuilder.fromMap(findImmovableCommand));
 
+// When a block is broken and it's obsidian we stop 
+// highlighting it because it doesn't exist anymore.
 blockBreakEvent = new GameEvent("onBlockBroken", fun(block) {
     if (immovable.contains(block.getMaterial())) {
         boxManager.removePosition(block.getX(), block.getY(), block.getZ());
@@ -129,11 +146,11 @@ blockBreakEvent = new GameEvent("onBlockBroken", fun(block) {
 
 blockBreakEvent.register();
 
+// Core loop
 while (true) {
     if (shouldRun) {
         findObsidian();
     }
+    // We sleep so we don't set our computer on fire
     sleep(1000);
 }
-
-hold();
