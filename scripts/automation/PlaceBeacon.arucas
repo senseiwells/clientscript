@@ -1,0 +1,94 @@
+/*
+* @Authors: aFriendlyPig, Erv123
+* Stand in the direct center of the block, and have all items in your inventory.
+*/
+
+client = MinecraftClient.getClient();
+
+fun walk(distance) {
+    player = Player.get();
+
+    player.setWalking(true);
+    sleep(150*distance);
+    player.setWalking(false);
+}
+
+fun placeBeacon(block) {
+    player = Player.get();
+    world = client.getWorld();
+
+    if (player.getSlotFor(ItemStack.of(Material.of(block))) == null) print("Insufficient Materials.");
+
+    player.setSelectedSlot(0);
+    if(player.getHeldItem().getMaterial()!=Material.of(block)){
+        player.swapSlots(player.getSlotFor(ItemStack.of(Material.of(block))), player.getCurrentSlot()+36);
+        sleep(50);
+    }
+
+    x = Math.floor(player.getX());
+    y = Math.floor(player.getY());
+    z = Math.floor(player.getZ());
+    y_offset = 0;
+
+    //Corners
+    player.look(0,0);
+    walk(1);
+
+    player.interactBlock(new Pos(x+4,y,z+4),"down");
+    player.interactBlock(new Pos(x-4,y,z+4),"down");
+
+    player.look(180,0);
+    walk(3);
+    sleep(500);
+
+    player.interactBlock(new Pos(x-4,y,z-4),"down");
+    player.interactBlock(new Pos(x+4,y,z-4),"down");
+    player.interactBlock(new Pos(x-3,y,z-4),"down");
+    player.interactBlock(new Pos(x-4,y,z-3),"down");
+
+    player.look(0,0);
+    walk(2);
+    sleep(1000);
+
+    //Main Script
+    for (layer = 4; layer > 0; layer--) {
+        player.jump();
+        sleep(250);
+        player.interactBlock(new Pos(x,y+y_offset,z),"down");
+        for (x_offset = -layer; x_offset <= layer; x_offset++) {
+            for (z_offset = -layer; z_offset <= layer; z_offset++) {
+                blockPos = new Pos(x+x_offset, y+y_offset, z+z_offset);
+                if(world.getBlockAt(blockPos).getMaterial()== Material.AIR){
+                    if(player.getHeldItem().getCount()<3){
+                        player.swapSlots(player.getSlotFor(ItemStack.of(Material.of(block))), player.getCurrentSlot()+36);
+                        sleep(150);
+                    }
+                    player.interactBlock(blockPos,"down");
+                }
+                sleep(100);
+            }
+        }
+        y_offset++;
+        sleep(50);
+    }
+    player.swapSlots(player.getSlotFor(ItemStack.of(Material.of("beacon"))), player.getCurrentSlot()+36);
+    sleep(50);
+    player.jump();
+    sleep(250);
+    player.interactBlock(new Pos(x,y+y_offset,z),"down");
+}
+beaconCommandMap = {
+    "name" : "placeBeacon",
+    "subcommands" : {
+        "<block>": {
+            "" : fun(block){
+                placeBeacon(block);
+            }
+        }
+    },
+    "arguments":{
+        "block":{"type" : "Word", "suggests" : ["iron_block", "gold_block","emerald_block","diamond_block","netherite_block"]}
+    }
+};
+client.addCommand(CommandBuilder.fromMap(beaconCommandMap));
+hold();
