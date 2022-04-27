@@ -124,7 +124,7 @@ fun placeBeacon(block) {
 }
 
 beaconCommandMap = {
-    "name": "placeBeacon",
+    "name": "beaconBuilder",
     "subcommands": {
         "<block>": {
             "": fun(block) {
@@ -134,7 +134,7 @@ beaconCommandMap = {
         "help": {
             "": fun() {
                 print(
-                    "This script allows you to build a beacon, use the '/placeBeacon <block>' command."
+                    "This script allows you to build a beacon, use the '/beaconBuilder <block>' command."
                 );
             }
         }
