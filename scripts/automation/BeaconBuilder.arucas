@@ -1,0 +1,159 @@
+/*
+ * @Authors: aFriendlyPig, Erv123
+ * Stand in the direct center of the block, and have all items in your inventory.
+ */
+
+client = MinecraftClient.getClient();
+blockTypes = ["iron_block", "gold_block", "emerald_block", "diamond_block", "netherite_block"];
+running = false;
+
+// Makes the player walk x amount
+fun walk(distance) {
+    player = Player.get();
+
+    player.setWalking(true);
+    sleep(150 * distance);
+    player.setWalking(false);
+}
+
+fun placeBeacon(block) {
+    // Shouldn't be able to place 2 beacons at once!
+    if (running) {
+        return;
+    }
+    running = true;
+
+    if (!blockTypes.contains(block)) {
+        print("Invalid Beacon Material Type!");
+        running = false;
+        return;
+    }
+
+    player = Player.get();
+    world = client.getWorld();
+    blockMaterial = Material.of(block);
+    blockItem = blockMaterial.asItemStack();
+
+    // We still allow for the player to build the base
+    // if they don't have the correct amount for a beacon
+    // or if they don't have the beacon itself
+    if (player.getSlotFor(blockItem) == null) {
+        print("Insufficient Materials!");
+        running = false;
+        return;
+    }
+
+    player.setSelectedSlot(0);
+    if (player.getHeldItem().getMaterial() != blockMaterial) {
+        player.swapSlots(player.getSlotFor(blockItem), player.getCurrentSlot() + 36);
+        sleep(50);
+    }
+
+    // Edge case this is possible
+    if (player.getHeldItem().getMaterial() != blockMaterial) {
+        print("Weren't holding the correct material, try again!");
+        running = false;
+        return;
+    }
+
+    x = Math.floor(player.getX());
+    y = Math.floor(player.getY());
+    z = Math.floor(player.getZ());
+    y_offset = 0;
+
+    // Corners - Player can't reach these without hacks
+    player.look(0, 0);
+    walk(1);
+
+    player.interactBlock(new Pos(x + 4, y, z + 4), "down");
+    player.interactBlock(new Pos(x - 4, y, z + 4), "down");
+
+    player.look(180, 0);
+    walk(3);
+    sleep(500);
+
+    player.interactBlock(new Pos(x - 4, y, z - 4), "down");
+    player.interactBlock(new Pos(x + 4, y, z - 4), "down");
+    player.interactBlock(new Pos(x - 3, y, z - 4), "down");
+    player.interactBlock(new Pos(x - 4, y, z - 3), "down");
+
+    player.look(0,0);
+    walk(2);
+    sleep(1000);
+
+    // Main Script - Places each layer of the beacon
+    for (layer = 4; layer > 0; layer--) {
+        player.jump();
+        sleep(250);
+        player.interactBlock(new Pos(x,y + y_offset,z),"down");
+        for (x_offset = -layer; x_offset <= layer; x_offset++) {
+            for (z_offset = -layer; z_offset <= layer; z_offset++) {
+                blockPos = new Pos(x + x_offset, y + y_offset, z + z_offset);
+                if (world.getBlockAt(blockPos).getMaterial() == Material.AIR){
+                    if (player.getHeldItem().getCount() < 3 && player.getGamemode() != "creative"){
+                        nextSlot = player.getSlotFor(blockItem);
+                        if (nextSlot == null) {
+                            print("Ran out of materials!");
+                            running = false;
+                            return;
+                        }
+                        player.swapSlots(nextSlot, player.getCurrentSlot() + 36);
+                        sleep(100);
+                    }
+                    player.interactBlock(blockPos, "down");
+                }
+            }
+        }
+        y_offset++;
+        sleep(500);
+    }
+
+    beaconSlot = player.getSlotFor(Material.BEACON.asItemStack());
+    if (beaconSlot == null) {
+        print("Could not place beacon!");
+        running = false;
+        return;
+    }
+
+    player.swapSlots(beaconSlot, player.getCurrentSlot() + 36);
+    sleep(50);
+    player.jump();
+    sleep(250);
+    player.interactBlock(new Pos(x, y + y_offset,z), "down");
+    running = false;
+}
+
+beaconCommandMap = {
+    "name": "beaconBuilder",
+    "subcommands": {
+        "<block>": {
+            "": fun(block) {
+                placeBeacon(block);
+            }
+        }
+        "help": {
+            "": fun() {
+                print(
+                    "This script allows you to build a beacon, use the '/beaconBuilder <block>' command."
+                );
+            }
+        }
+    },
+    "arguments": {
+        "block": {"type" : "Word", "suggests" : blockTypes}
+    }
+};
+
+client.addCommand(CommandBuilder.fromMap(beaconCommandMap));
+
+// Prevents the player from moving when the beacon is being built
+keyEvent = new GameEvent("onKeyPress", fun(key) {
+    if (running) {
+        GameEvent.cancel();
+    }
+}, true);
+keyEvent.register();
+
+
+// Thread.freeze(); // for Arucas 1.2.0+
+hold();
