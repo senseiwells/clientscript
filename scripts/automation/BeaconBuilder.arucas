@@ -130,7 +130,7 @@ beaconCommandMap = {
             "": fun(block) {
                 placeBeacon(block);
             }
-        }
+        },
         "help": {
             "": fun() {
                 print(
