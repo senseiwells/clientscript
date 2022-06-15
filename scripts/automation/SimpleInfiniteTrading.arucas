@@ -1,30 +1,114 @@
 import * from Minecraft;
+import StringBuilder from util.StringUtils;
 
-// Map of wanted items and any enchantments they have
-wantedItems = {
-    Material.ENCHANTED_BOOK: {
-        "feather_falling" : 2
-    },
-    Material.GLASS : { },
-    Material.BOOKSHELF : { }
-};
+// Config for whether the script is active
+ACTIVE_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Infinite Trade Running",
+    "description": "Whether the infinite trading is currently running",
+    "default_value": false
+});
+// Config for selected items
+ITEMS_CONFIG = Config.fromMap({
+    "type": "list",
+    "name": "Items To Trade",
+    "description": "These are the items you want to trade as item nbt",
+    "default_value": [
+        "bookshelf"
+    ],
+    "max_length": 128
+});
+// Config for tick delay
+DELAY_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Trade Delay",
+    "description": "The amount of ticks delay before trading",
+    "max": 10000,
+    "min": 1,
+    "default_value": 400
+});
+// Config for whether player should drop items
+DROP_ALL_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Drop Traded Items",
+    "description": "Whether items are dropped after the player has traded",
+    "default_value": true
+});
+// Config for whether notify when out of items
+OUT_OF_ITEMS_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Notify When Out Of Items",
+    "description": "This will send a message to you when the player doesn't have the right amount of items for a trade",
+    "default_value": false
+});
+// Config for whether the player should send updates to the chat
+SEND_CHAT_UPDATES_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Send Chat Updates",
+    "description": "This will send messages to all players in chat on your status while trading",
+    "default_value": false
+});
+
+configHandler = new ConfigHandler("InfiniteTradeConfig", false);
+configHandler.addConfigs([ACTIVE_CONFIG, ITEMS_CONFIG, DELAY_CONFIG, DROP_ALL_CONFIG, OUT_OF_ITEMS_CONFIG, SEND_CHAT_UPDATES_CONFIG]);
+configHandler.read();
+
+configKeybind = new KeyBind("Infinite Trading Config");
+configKeybind.setKey("i");
+configKeybind.setCallback(fun() {
+    Player.get().openScreen(configHandler.createScreen(Text.of("Infinite Trading Config")));
+});
+
+client = MinecraftClient.get();
+totalTradedMap = {};
+totalTime = 0;
+
+fun getWantedItems() {
+    itemStackList = [];
+    foreach (string : ITEMS_CONFIG.getValue()) {
+        itemStackList.append(ItemStack.parse(string));
+    }
+    return itemStackList;
+}
+
+fun playerHasItems(player, itemStack) {
+    if (itemStack.getMaterial() != Material.AIR) {
+        slots = player.getAllSlotsFor(itemStack);
+        count = itemStack.getCount();
+        total = 0;
+        foreach (slot : slots) {
+            item = player.getItemForSlot(slot);
+            total = total + item.getCount();
+        }
+        if (total < count) {
+            print("Needed %s but had %s of %s".format(count, total, itemStack));
+            return false;
+        }
+    }
+    return true;
+}
 
 fun tradeWithVillager(player, villager) {
     player.interactWithEntity(villager);
     // We wait until we are no longer looking at the villager
-    while (true) {
-        entity = player.getLookingAtEntity();
-        if (entity == null || entity.getId() != "villager") {
-            break;
-        }
+    isLookingAtVillager = true;
+    while (isLookingAtVillager) {
+        // We run on main thread to ensure no concurrency issues
+        client.runOnMainThread(fun() {
+            entity = player.getLookingAtEntity();
+            if (entity == null || entity.getId() != "villager") {
+                isLookingAtVillager = false;
+            }
+        });
         sleep(50);
     }
-    // You may need to ajust this based on your setup
-    sleep(400);
+
+    sleep(DELAY_CONFIG.getValue());
     currentScreen = player.getCurrentScreen();
-    if (!currentScreen.instanceOf("MerchantScreen")) {
+    if (!currentScreen.instanceOf(MerchantScreen.type)) {
         return;
     }
+
     tradeList = currentScreen.getTradeList();
     for (i = 0; i < len(tradeList); i++) {
         trade = tradeList.get(i);
@@ -32,17 +116,20 @@ fun tradeWithVillager(player, villager) {
         if (trade.getUses() >= trade.getMaxUses()) {
             continue;
         }
+
         sellItem = trade.getSellItem();
         sellItemEnchants = sellItem.getEnchantments();
-        foreach (material : wantedItems.getKeys()) {
-            if (sellItem.getMaterial() != material) {
+
+        foreach (itemStack : getWantedItems()) {
+            if (sellItem.getMaterial() != itemStack.getMaterial()) {
                 continue;
             }
+
             isMatch = true;
-            materialEnchants = wantedItems.get(material);
-            foreach (enchant : materialEnchants.getKeys()) {
+            wantedEnchants = itemStack.getEnchantments();
+            foreach (enchant : wantedEnchants.getKeys()) {
                 // Compares enchantments
-                if (sellItemEnchants.get(enchant) != materialEnchants.get(enchant)) {
+                if (sellItemEnchants.get(enchant) != wantedEnchants.get(enchant)) {
                     isMatch = false;
                     break;
                 }
@@ -50,28 +137,85 @@ fun tradeWithVillager(player, villager) {
             if (!isMatch) {
                 continue;
             }
+
+            first = trade.getAdjustedFirstBuyItem();
+            second = trade.getSecondBuyItem();
+
+            startUses = trade.getUses();
             // We trade until we can't
             for (j = 0; trade.getUses() < trade.getMaxUses(); j++) {
-                if (j > 100) {
-                    // You could maybe add a check to see if the player
-                    // still has the required items to do the trade
+                // If the player cannot afford the trade we skip it
+                if (!playerHasItems(player, first) || !playerHasItems(player, second)) {
+                    break;
+                }
+                // If the player has no space in the inventory we skip
+                if (player.getSlotFor(Material.AIR) == null) {
+                    print("inventory full");
+                    break;
+                }
+
+                if (j > 10) {
+                    // This is a failsafe if something goes very wrong
                     print("Tried to trade too many times");
                     stop();
                 }
                 currentScreen.tradeIndex(i);
                 sleep(50);
             }
-            sleep(50);
-            player.dropAll(material.asItemStack());
+
+            uses = trade.getUses() - startUses;
+            totalUses = totalTradedMap.get(sellItem);;
+            if (totalUses == null) {
+                totalUses = uses;
+            }
+            else {
+                totalUses = totalUses + uses;
+            }
+            totalTradedMap.put(sellItem, totalUses);
+
+            sleep(100);
+            player.dropAll(itemStack);
         }
     }
 }
 
+fun sendChatUpdate() {
+    if (SEND_CHAT_UPDATES_CONFIG.getValue()) {
+        builder = new StringBuilder("Time since script started: ");
+        builder + totalTime + " minutes, I have traded: ";
+        if (totalTradedMap.isEmpty()) {
+            builder + "nothing :(";
+        }
+        foreach (itemStack : totalTradedMap) {
+            times = totalTradedMap.get(itemStack);
+            builder + (times * itemStack.getCount()) + " of " + itemStack.getId() + ", ";
+        }
+        Player.get().say(builder.toString());
+    }
+}
+
+Thread.runThreaded(fun() {
+    // Delay 60 seconds
+    sleep(60 * 1000);
+    while (true) {
+        sendChatUpdate();
+        totalTime = totalTime + 30;
+        // 30 minutes in milliseconds
+        sleep(30 * 60 * 1000);
+    }
+});
+
+new GameEvent("onScriptEnd", fun() {
+    sendChatUpdate();
+});
+
 while (true) {
-    player = Player.get();
-    entity = player.getLookingAtEntity();
-    if (entity != null && entity.getId() == "villager") {
-        tradeWithVillager(player, entity);
+    if (ACTIVE_CONFIG.getValue()) {
+        player = Player.get();
+        entity = player.getLookingAtEntity();
+        if (entity != null && entity.getId() == "villager") {
+            tradeWithVillager(player, entity);
+        }
     }
     sleep(50);
 }
