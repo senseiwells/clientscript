@@ -1,3 +1,5 @@
+import * from Minecraft;
+
 // Map of wanted items and any enchantments they have
 wantedItems = {
     Material.ENCHANTED_BOOK: {

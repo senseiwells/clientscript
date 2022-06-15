@@ -1,3 +1,6 @@
+import * from Minecraft;
+import Json from util.Json;
+
 client = MinecraftClient.getClient();
 
 // Change where you want data stored using this

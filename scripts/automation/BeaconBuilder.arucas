@@ -3,6 +3,8 @@
  * Stand in the direct center of the block, and have all items in your inventory.
  */
 
+import * from Minecraft;
+
 client = MinecraftClient.getClient();
 blockTypes = ["iron_block", "gold_block", "emerald_block", "diamond_block", "netherite_block"];
 running = false;

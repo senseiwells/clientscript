@@ -1,3 +1,5 @@
+import * from Minecraft;
+
 fun swapCurrentPlayerSlot(toSlot) {
     player = Player.get();
     player.clickSlot(36 + player.getCurrentSlot(), toSlot, "swap");

@@ -1,3 +1,5 @@
+import * from Minecraft;
+
 // Single box manager class allows us to abstract the highlighting process
 class SingleBoxManager {
     var boxes = { };
