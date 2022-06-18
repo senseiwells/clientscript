@@ -1,0 +1,106 @@
+import * from Minecraft;
+
+// Config for items to trash
+ITEMS_CONFIG = Config.fromMap({
+    "type": "list",
+    "name": "Items To Drop",
+    "description": "These are the items you want to automaticly drop",
+    "max_length": 128
+});
+// Config for autoTrash interval
+DROP_INTERVAL_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "AutoTrash Interval In Seconds",
+    "description": "Interval to look for trashable items in the inventory",
+    "max": 1000,
+    "min": 1,
+    "default_value": 10
+});
+// Config for whether player should drop items on pickup
+AUTOTRASH_ON_PICKUP_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Drop Items On Pickup",
+    "description": "Whether items in the list are dropped after the player picked it",
+    "default_value": true
+});
+// Config for whether player should drop items on a set interval
+AUTOTRASH_ON_INTERVAL_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Drop Items At Set Interval",
+    "description": "Whether items in the list are dropped on a set interval",
+    "default_value": false
+});
+
+configHandler = new ConfigHandler("AutoDropItems", false);
+configHandler.addConfigs([ITEMS_CONFIG, DROP_INTERVAL_CONFIG, AUTOTRASH_ON_PICKUP_CONFIG, AUTOTRASH_ON_INTERVAL_CONFIG]);
+configHandler.read();
+
+configKeybind = new KeyBind("AutoDrop Items Config");
+configKeybind.setKey("j");
+configKeybind.setCallback(fun() {
+    Player.get().openScreen(configHandler.createScreen(Text.of("AutoDrop Items Config")));
+});
+
+
+new GameEvent("onPickUpItem", fun(item) {
+    if(AUTOTRASH_ON_PICKUP_CONFIG.getValue()) {
+        material = Material.of(item.getId());
+        if (ITEMS_CONFIG.getValue().contains("minecraft:" + material) || ITEMS_CONFIG.getValue().contains(material)) {
+            Player.get().dropAll(material);
+        }
+    }
+});
+
+commandSpawnable = {
+    "name" : "autoTrash",
+    "subcommands" : {
+        "add" : {
+            "<additem>" : {
+                "" : fun(additem) {
+                    list = ITEMS_CONFIG.getValue();
+                    list.append("minecraft:" + additem.getId());
+                    ITEMS_CONFIG.setValue(list);
+                }
+            }
+        },
+        "remove" : {
+            "<removeitem>" : {
+                "" : fun(removeitem) {
+                    list = ITEMS_CONFIG.getValue();
+                    index = null;
+                    for (i = 0 ; i <len(list) ; i++) {
+                        if(list.get(i) == removeitem) index = i;
+                    }
+                    list.remove(index);
+                    ITEMS_CONFIG.setValue(list);
+                }
+            }
+        }
+    },
+    "arguments": {
+        "additem" : {"type" : "ItemStack"},
+        "removeitem" : {
+            "type" : "GreedyString",
+            "suggester" : fun(args...) {
+                return ITEMS_CONFIG.getValue();
+            }
+        }
+    }
+};
+
+MinecraftClient.getClient().addCommand(CommandBuilder.fromMap(commandSpawnable));
+
+Thread.runThreaded(fun() {
+    while (true) {
+        if(AUTOTRASH_ON_INTERVAL_CONFIG.getValue()) {
+            foreach( item : ITEMS_CONFIG.getValue() ) {
+                if (item != "") {
+                    Player.get().dropAll(Material.of(item));
+                }   
+            }
+        }
+        sleep(DROP_INTERVAL_CONFIG.getValue() * 1000);
+    }
+});
+
+hold();

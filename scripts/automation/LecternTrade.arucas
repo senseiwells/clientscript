@@ -1,242 +1,317 @@
 import * from Minecraft;
+import MaterialUtils from minecraft.MinecraftUtils; 
+
+// Config for selected items
+ITEMS_CONFIG = Config.fromMap({
+    "type": "list",
+    "name": "Enchants To Find",
+    "description": "These are the enchants you want to find",
+    "default_value": [
+        "looting,3,20"
+    ],
+    "max_length": 64
+});
+// Config for the lectern coordinates
+LECTERN_COORDINATES_CONFIG = Config.fromMap({
+    "type": "string",
+    "name": "Lectern Coordinates",
+    "description": "These are the coordinates of the villager's lectern",
+    "default_value": ""
+});
+// Config for DEFAULT_LEVEL
+LEVEL_CONFIG = Config.fromMap({
+    "type": "integer",
+    "name": "Default Level",
+    "description": "Default level used in the add command",
+    "default_value": 1
+});
+// Config for DEFAULT_PRICE
+PRICE_CONFIG = Config.fromMap({
+    "type": "integer",
+    "name": "Default Price",
+    "description": "Default price used in the add command",
+    "default_value": 64
+});
+// Config for AXE_SLOT
+AXE_SLOT_CONFIG = Config.fromMap({
+    "type": "integer",
+    "name": "HotbarSlot For Axe",
+    "description": "Slot for the axe in the hotbar, between 1 - 9",
+    "default_value": 5
+});
+// Config for LECTERN_SLOT
+LECTERN_SLOT_CONFIG = Config.fromMap({
+    "type": "integer",
+    "name": "HotbarSlot For Lectern",
+    "description": "Slot for the lectern in the hotbar, between 1 - 9",
+    "default_value": 6
+});
+
+configHandler = new ConfigHandler("LecternTradeConfig", false);
+configHandler.addConfigs([ITEMS_CONFIG, LECTERN_COORDINATES_CONFIG, LEVEL_CONFIG, PRICE_CONFIG, AXE_SLOT_CONFIG, LECTERN_SLOT_CONFIG]);
+configHandler.read();
+
+// Keybind for config screen
+configKeybind = new KeyBind("Lectern Trading Config");
+configKeybind.setKey("i");
+configKeybind.setCallback(fun() {
+    Player.get().openScreen(configHandler.createScreen(Text.of("Lectern Trading Config")));
+});
 
 client = MinecraftClient.getClient();
-player = client.getPlayer();
+player = Player.get();
 world = client.getWorld();
 
-fun showSuccess() {
-    player.messageActionBar("A");
-    sleep(100000);
+IS_RUNNING = false;
+
+// Find lectern and select it
+fun getLectern() {
+    lecternSlot = LECTERN_SLOT_CONFIG.getValue() - 1;
+    player.setSelectedSlot(lecternSlot);
+
+    if (player.getItemForSlot(36 + lecternSlot).getId() != "lectern") {
+        if (player.getSlotFor(Material.LECTERN.asItemStack()) != null) {
+            player.swapSlots(player.getSlotFor(Material.LECTERN.asItemStack()), 36 + lecternSlot);
+        } else {
+            print("No lectern available. Waintig 5 secondes...");
+            // Leave the player 5 secondes to fetch the lectern that flew away, if they are not using carreful break
+            sleep(5000);
+        }
+    } 
 }
 
-fun showMsg(msg, time) {
-    player.messageActionBar(msg);
-    sleep(time);
-}
+// Find best axe and select it
+fun getAxe() {
+    axeSlot = AXE_SLOT_CONFIG.getValue() - 1;
 
-fun getIterator(start, end, num){
-    ii = 0;
-    maxlen = 1000;
-    ret = [start];
-    c = start;
-    while (c < end && ii < maxlen){
-        c = c+num;
-        ret.append(c);
-        ii = ii+1;
-    }
-    return ret;
-}
+    player.setSelectedSlot(axeSlot);
 
-bx = 221;
-by = 49;
-bz = 138;
+    if (!MaterialUtils.getAxes().contains(Material.of(player.getItemForSlot(36 + axeSlot).getId()))) {
+        tempAxeSlot = null;
+        foreach( axe : MaterialUtils.getAxes() ) {
+            if (player.getSlotFor(axe) != null)
+                tempAxeSlot = player.getSlotFor(axe);
+        }
 
-reach = 1;
-found = false;
-sx = player.getX();
-sy = player.getY();
-sz = player.getZ();
-SxL = getIterator(sx-reach, sx+reach, 1);
-SyL = getIterator(sy-reach, sy+reach, 1);
-SzL = getIterator(sz-reach, sz+reach, 1);
-foreach (Sx : SxL) {
-    foreach (Sy : SyL ) {
-        foreach (Sz : SzL) {
-            if (world.getBlockAt(Sx,Sy,Sz).getId() == 'lectern'){
-                bx = Sx;
-                by = Sy;
-                bz = Sz;
-                found = true;
-                break;
-            }
+        if (tempAxeSlot != null) {
+            player.swapSlots(tempAxeSlot, 36 + axeSlot);
+        } else {
+            print("No axe available. Stopping script.");
+            // Stop the script if there's no axe in the player inventory
+            IS_RUNNING = false;
         }
     }
 }
 
-if(!found) {
-    throwRuntimeError('No lectern found');
+// Loop until lectern placed
+fun placeBlock(lecternCoordinates) {
+    while (IS_RUNNING) {
+        if (world.getBlockAt(lecternCoordinates).getId() == "lectern") return true;
+        
+        getLectern();
+
+        player.interactBlock(lecternCoordinates, "up", lecternCoordinates, false);
+        sleep(100);
+    }
 }
 
-refMap = {
-    "fortune" : {0:3, 1:12},
-    "mending" :{0:1, 1:12},
-    "unbreaking" : {0:3, 1:17},
-    "aqua_affinity" : {0:1, 1:7},
-    "blast_protection" : {0:4, 1:15},
-    "depth_strider" : {0:3, 1:12},
-    "feather_falling" : {0:4, 1:15},
-    "frost_walker" : {0:1, 1:16},
-    "protection" : {0:4, 1:15},
-    "respiration" : {0:3, 1:15},
-    "thorns" : {0:3, 1:15},
-    "efficiency" : {0:5, 1:26},
-    "sharpness" : {0:5, 1:20},
-    "smite" : {0:5, 1:25},
-    "sweeping_edge" : {0:3, 1:15},
-    "channeling" : {0:1, 1:20},
-    "flame" : {0:1, 1:10},
-    "looting" : {0:3, 1:17},
-    "infinity" : {0:1, 1:5},
-    "loyalty" : {0:3, 1:20},
-    "riptide" : {0:3, 1:20},
-    "multishot" : {0:1, 1:20},
-    "piercing" : {0:4, 1:25},
-    "power" : {0:5, 1:17},
-    "punch" : {0:2, 1:12},
-    "quick_charge" : {0:3, 1:17},
-    "luck_of_the_sea" : {0:3, 1:17},
-    "lure" : {0:3, 1:17},
-    "silk_touch" : {0:1, 1:5}
+// Break block, carefull break proof with player sneaking
+fun breakBlock(lecternCoordinates) {
+    sleep(100);
+    getAxe();
+
+    player.setSneaking(true);
+    while (world.getBlockAt(lecternCoordinates).getId() == 'lectern'){
+        player.updateBreakingBlock(lecternCoordinates);
+        sleep(50);
+    }
+    player.setSneaking(false);
+}
+
+// Return the map of enchant mapped with level and price
+fun getWantedEnchantsAsMap() {
+    enchantList = {};
+    foreach (string : ITEMS_CONFIG.getValue()) {
+        item = string.replaceAll(" ", "").split(',');
+        level = LEVEL_CONFIG.getValue();
+        price = PRICE_CONFIG.getValue();
+
+        // Use default level and price if not mentionned
+        try {
+            if (item[1] != null) level = item[1].toNumber();
+            if (item[2] != null) price = item[2].toNumber();
+        } catch(e) {}
+        
+        enchantList.putIfAbsent(item[0], [level, price]);
+    }
+    return enchantList;
+}
+
+// Return a list of string "enchant,level,price"
+fun getWantedEnchantsFromMap(map) {
+    enchantList = [];
+    foreach (enchant : map) {
+        enchantList.append(enchant + "," + map.get(enchant)[0] + "," + map.get(enchant)[1]);
+    }
+    return enchantList;
+}
+
+fun runTrade(villager) {
+    wantedList = getWantedEnchantsAsMap();
+    lecternCoordinates = stringToPos(LECTERN_COORDINATES_CONFIG.getValue());
+
+    placeBlock(lecternCoordinates);
+
+    // Loop until the Villager screen is open
+    while (player.getCurrentScreen() == null || player.getCurrentScreen().getName() != "Merchant"){
+        // this is to stop the process when using /lecternTrade stop while stuck in this loop
+        // The player does not have anymore lectern, so the villager is jobless and can't be open
+        // The player use /lecternTrade stop but is stuck is this loop
+        if (!IS_RUNNING) return; 
+
+        player.interactWithEntity(villager);
+        sleep(100);
+    }
+
+    isWanted = false;
+    index = player.getCurrentScreen().getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
+    if (index == null){
+        player.closeScreen();
+
+        breakBlock(lecternCoordinates);
+        sleep(100);
+
+        return;
+    } else {
+        item = player.getCurrentScreen().getTradeItemForIndex(index);
+        price = player.getCurrentScreen().getPriceForIndex(index);
+        enchants = item.getEnchantments();
+
+        foreach (key : enchants.getKeys()) {
+            enchant = enchants.get(key);
+            wanted = wantedList.get(key);   // Try to get the enchant in the list, return null if enchant isn't wanted
+
+            if (wanted == null){
+                isWanted = false;
+                break;
+            } else {print("Wanted -> " + key + " " + wanted.get(0) + " for " + wanted.get(1) + "E | Found -> " + key + " " + enchant + " for " + price + "E");}
+            if (enchant >= wanted.get(0) && price <= wanted.get(1)){isWanted = true;break;} else {isWanted = false;}
+        }
+    }
+
+    if (isWanted){
+        print("Done");
+        IS_RUNNING = false;
+    } else {
+        player.closeScreen();
+        breakBlock(lecternCoordinates);
+        sleep(100);
+    }
+}
+
+fun stringToPos(string) {
+    x, y, z = string.split(" ");
+    return new Pos(x.toNumber(), y.toNumber(), z.toNumber());
+}
+
+fun posToString(pos) {
+    return "" + pos.getX() + " " + pos.getY() + " " + pos.getZ();
+}
+
+commandSpawnable = {
+    "name" : "lecternTrade",
+    "subcommands" : {
+        "setLectern" : {
+            "<pos>" : {
+                "" : fun(pos) {
+                    LECTERN_COORDINATES_CONFIG.setValue(posToString(pos));
+                    print("Lectern coordinates set to : " + pos);
+                }
+            }
+        },
+        "run" : {
+            "" : fun() {
+                if (len(LECTERN_COORDINATES_CONFIG.getValue()) > 0) {
+                    IS_RUNNING = true;
+                    print("Running...");
+                } else {
+                    print("You need to setup the lectern coordinates before running the script!");
+                    print("Use /lecternTrade setLectern <pos>");
+                }
+                
+            }
+        },
+        "stop" : {
+            "" : fun() {
+                IS_RUNNING = false;
+                player.setSneaking(false); // If stopped at the wrong time the player might be still sneaking
+                print("Stopping...");
+            }
+        },
+        "addEnchant" : {
+            "<enchant>" : {
+                "" : fun(enchant) {
+                    list = ITEMS_CONFIG.getValue();
+                    list.append(enchant.replaceAll("minecraft:", "") + "," + LEVEL_CONFIG.getValue() + "," + PRICE_CONFIG.getValue());
+                    ITEMS_CONFIG.setValue(list);
+                    print("Added " + enchant.replaceAll("minecraft:", "") + " " + LEVEL_CONFIG.getValue() + " for " + PRICE_CONFIG.getValue() + " emeralds");
+                },
+                "<level>" : {
+                    "" : fun(enchant, level) {
+                        list = ITEMS_CONFIG.getValue();
+                        list.append(enchant.replaceAll("minecraft:", "") + "," + level+ "," + PRICE_CONFIG.getValue());
+                        ITEMS_CONFIG.setValue(list);
+                        print("Added " + enchant.replaceAll("minecraft:", "") + " " + level + " for " + PRICE_CONFIG.getValue() + " emeralds");
+                    },
+                    "<price>" : {
+                        "" : fun(enchant, level, price) {
+                            list = ITEMS_CONFIG.getValue();
+                            list.append(enchant.replaceAll("minecraft:", "") + "," + level + "," + price);
+                            ITEMS_CONFIG.setValue(list);
+                            print("Added " + enchant.replaceAll("minecraft:", "") + " " + level + " for " + price + " emeralds");
+                        }
+                    }
+                }
+            },
+            "help" : {
+                "" : fun() {
+                    print("/lecternTrade addEnchant <enchant> <level> <price>");
+                }
+            }
+        },
+        "removeEnchant" : {
+            "<removeEnchant>" : {
+                "" : fun(removeEnchant) {
+                    map = getWantedEnchantsAsMap();
+                    map.remove(removeEnchant);
+                    ITEMS_CONFIG.setValue(getWantedEnchantsFromMap(map));
+                    print("Removed " + removeEnchant + " from the wanted list");
+                }
+            }
+        }
+    },
+    "arguments" : {
+        "pos" : {"type" : "BlockPos"},
+        "enchant" : {"type" : "EnchantmentId"},
+        "level" : {"type" : "Integer"},
+        "price" : {"type" : "Integer"},
+        "removeEnchant" : {
+            "type" : "GreedyString",
+            "suggester" : fun(args...) {
+                return getWantedEnchantsAsMap().getKeys();
+            }
+        }
+    }
 };
 
-mapFor = refMap;
-fun swapToaxe() {
-    slot = player.getSlotFor(ItemStack.of(Material.of("netherite_axe")));
-    if (slot == null) {
-        slot = player.getSlotFor(ItemStack.of(Material.of("diamond_axe")));
-    }
-    if (slot != null) {
-        if (0 <= slot - 36 && slot - 36 <= 8) {
-            player.setSelectedSlot(slot - 36);
-            return true;
-        } else {
-            preslot = player.getSwappableHotbarSlot();
-            player.swapPlayerSlotWithHotbar(slot);
-            player.setSelectedSlot(preslot);
-            return true;
-        }
-    }
-    throwRuntimeError("No pickaxe item was found");
-}
+client.addCommand(CommandBuilder.fromMap(commandSpawnable));
 
-fun swapToItem(itemString) {
-    if (itemString == "air") {
-        return false;
-    }
-    foreach (i : [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]){
-        if (player.getItemForPlayerSlot(i).getId() == itemString){
-            player.setSelectedSlot(i);
-            return false;
-        }
-    }
-    slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-    retVal = false;
-    if (slot == null) {
-        throwRuntimeError("No " + itemString + " was found");
-    }
-    if (player.getItemForSlot(slot).getCount() == 1) {
-        retVal = true;
-    }
-    if (slot != null) {
-        if (0 <= slot - 36 && slot - 36 <= 8) {
-            player.setSelectedSlot(slot - 36);
-            return retVal;
-        } else {
-            preslot = player.getSwappableHotbarSlot();
-            player.swapPlayerSlotWithHotbar(slot);
-            player.setSelectedSlot(preslot);
-            return retVal ;
-        }
-    }
-
-}
-
-fun placeBlock(){
-    while (true) {
-        if (world.getBlockAt(bx,by,bz).getId()=='lectern'){
-            return true;
-        }
-        swapToItem('lectern');
-        player.interactBlock(bx,by,bz,"up",bx,by,bz,false);
-        sleep(100);
-    }
-}
-
-
-
-fun doTradeSetup(enchantName, lvl, price){
-isWanted = false;
-trial = 0;
 while (true) {
-    trial ++;
-    player.messageActionBar('trial'+ trial+ 'finding'+ enchantName +'lvl'+ lvl+'price' + price);
-    player.setSneaking(false);
-    placeBlock();
-    sleep(200);
-    while (player.getCurrentScreen() == null || !player.getCurrentScreen().instanceOf("MerchantScreen") ){
-    allEntities = client.getWorld().getAllEntities();
-    foreach (entity : allEntities) {
-        if (entity.getId() == "villager" && player.getSquaredDistanceTo(entity) < 5) {
-            player.interactWithEntity(entity);
+    if (IS_RUNNING) {
+        entity = player.getLookingAtEntity();
+        if (entity != null && entity.getId() == "villager") {
+            runTrade(entity);
         }
     }
-    sleep(100);}
-    screen = player.getCurrentScreen();
-    index = screen.getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
-    if (index == null) {
-        player.closeScreen();
-
-        player.setSneaking(true);
-        sleep(200);
-        while (world.getBlockAt(bx,by,bz).getId() == 'lectern') {
-            swapToaxe();
-            player.setSneaking(true);
-            player.updateBreakingBlock(bx,by,bz);
-            sleep(50);
-        }
-
-        continue;
-    }
-    else {
-        sleep(100);
-        item = screen.getTradeItemForIndex(index);
-        value = screen.getPriceForIndex(index);
-        enchant = item.getEnchantments();
-        foreach (keys : enchant.getKeys()) {
-        val = enchant.get(keys);
-        mapval = mapFor.get(keys);
-        player.messageActionBar(keys +'lv' + val+ 'price'+value);
-        if (mapval == null || enchantName != keys || val < lvl || value > price){
-            isWanted = false;
-            break;
-        }
-            if (enchantName == keys && val >= lvl && value <= price) {
-                isWanted = true;
-                break;
-            } else {
-                isWanted = false;
-            }
-        }
-    }
-    if (isWanted != true){
-        player.closeScreen();
-        player.setSneaking(true);
-        swapToaxe();
-        sleep(20);
-        while (world.getBlockAt(bx,by,bz).getId() == 'lectern') {
-            swapToaxe();
-            player.setSneaking(true);
-            player.updateBreakingBlock(bx,by,bz);
-            sleep(50);
-        }
-    }
-    else stop();
-}
-}
-enchant = CommandBuilder.argument("enchantment", "Word");
-level = CommandBuilder.argument("level", "Integer");
-price = CommandBuilder.argument("price", "Integer");
-root = CommandBuilder.literal("tradeSetup");
-root.then(CommandBuilder.argument("enchantment", "Word").then(
-        CommandBuilder.argument("level", "Integer").then(
-            CommandBuilder.argument("price", "Integer").executes(
-                fun (enchantment, level, price) {doTradeSetup(enchantment, level, price);}
-            )
-        )
-    )
-);
-MinecraftClient.getClient().addCommand(root);
-//doTradeSetup('fortune', 3, 64);
-while(true){
-
+    sleep(50);
 }
