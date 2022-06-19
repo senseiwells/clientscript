@@ -73,7 +73,7 @@ fun getLectern() {
         if (player.getSlotFor(Material.LECTERN.asItemStack()) != null) {
             player.swapSlots(player.getSlotFor(Material.LECTERN.asItemStack()), 36 + lecternSlot);
         } else {
-            print("No lectern available. Waintig 5 secondes...");
+            print("No lectern available. Waiting 5 seconds...");
             // Leave the player 5 secondes to fetch the lectern that flew away, if they are not using carreful break
             sleep(5000);
         }
