@@ -1162,7 +1162,7 @@ list.insert(0, 0); // list = [0, 1, 2, 3]
 list.remove(3); // list = [0, 1, 2]
 
 // set method sets the value at a specific index
-list.set(0, "zero"); // list = ["zero", 1, 2]
+list.set("zero", 0); // list = ["zero", 1, 2]
 
 // A short hand for assigning indexes of lists was introduced in 1.2.0
 // We can again use the [] operator to assign an index in the list
