@@ -48,9 +48,18 @@ SEND_CHAT_UPDATES_CONFIG = Config.fromMap({
     "description": "This will send messages to all players in chat on your status while trading",
     "default_value": false
 });
+// Config for moving left after certain number of inactive ticks
+MOVE_LEFT_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Move Left",
+    "description": "This will make the player move left if they have been afk for over a certain amount of ticks, set to 0 to disable",
+    "max": 1000,
+    "min": 0,
+    "default_value": 0
+});
 
 configHandler = new ConfigHandler("InfiniteTradeConfig", false);
-configHandler.addConfigs([ACTIVE_CONFIG, ITEMS_CONFIG, DELAY_CONFIG, DROP_ALL_CONFIG, OUT_OF_ITEMS_CONFIG, SEND_CHAT_UPDATES_CONFIG]);
+configHandler.addConfigs([ACTIVE_CONFIG, ITEMS_CONFIG, DELAY_CONFIG, DROP_ALL_CONFIG, OUT_OF_ITEMS_CONFIG, SEND_CHAT_UPDATES_CONFIG, MOVE_LEFT_CONFIG]);
 configHandler.read();
 
 configKeybind = new KeyBind("Infinite Trading Config");
@@ -194,6 +203,25 @@ fun sendChatUpdate() {
     }
 }
 
+afkTicks = 0;
+lastPos = Player.get().getPos();
+
+fun tickAfk() {
+    player = Player.get();
+    if (player.getPos() == lastPos) {
+        afkTicks++;
+    }
+    else {
+        lastPos = player.getPos();
+        afkTicks = 0;
+    }
+    left = MOVE_LEFT_CONFIG.getValue();
+    if (left != 0 && left <= afkTicks) {
+        player.closeScreen();
+        client.holdKey("a", 100);
+    }
+}
+
 Thread.runThreaded(fun() {
     // Delay 60 seconds
     sleep(60 * 1000);
@@ -216,6 +244,7 @@ while (true) {
         if (entity != null && entity.getId() == "villager") {
             tradeWithVillager(player, entity);
         }
+        tickAfk();
     }
     sleep(50);
 }
