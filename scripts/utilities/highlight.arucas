@@ -1,0 +1,277 @@
+import * from Minecraft;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+
+globalBoxes = {};
+fun getIterator(start, end, num){
+    ii = 0;
+    maxlen = 1000000;
+    ret = [start];
+    c = start;
+    while (c < end && ii < maxlen){
+        c = c+num;
+        ret.append(c);
+        ii = ii+1;
+    }
+    return ret;
+}
+fun iterateFun(reach, function, arguments){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    SxL = getIterator(sx-reach, sx+reach, 1);
+    SyL = getIterator(sy-reach, sy+reach, 1);
+    SzL = getIterator(sz-reach, sz+reach, 1);
+    foreach (Sx : SxL) {
+        foreach (Sy : SyL ) {
+            foreach (Sz : SzL) {
+                pos = new Pos(Sx,Sy,Sz);
+                box = function(pos, arguments);
+                if (box != null) {
+                    retVal.append(box);
+                }
+            }
+        }
+    }
+    return retVal;
+}
+fun asString(position){
+    return ''+ position.getX().round() + ':'+ position.getY().round()+ ':' + position.getZ().round();
+}
+fun asBlockPos(string){
+    xyz = string.split(':');
+    return new Pos(xyz.get(0).toNumber(),xyz.get(1).toNumber(),xyz.get(2).toNumber());
+}
+fun renderBoxIf(position, containsString){
+    if (world.getBlockAt(position).getId().contains(containsString)){
+        box = new BoxShape(position);
+        box.setOutlineColor(255,0,0);
+        box.setOpacity(120);
+        box.setRenderThroughBlocks(true);
+        return box;
+    }
+}
+fun renderBoxWhatever(position){
+    box = new BoxShape(position);
+    box.setColour(255,0,0);
+    box.setOutlineColor(0,0,0);
+    box.setOpacity(20);
+    box.setOutlinePixelWidth(15);
+    box.setRenderThroughBlocks(true);
+    return box;
+}
+fun renderBoxWhateverColor(position, colorA, colorB, colorC){
+    box = new BoxShape(position);
+    box.setColour(colorA, colorB, colorC);
+    box.setOutlineColor(0,0,0);
+    box.setOpacity(20);
+    box.setOutlinePixelWidth(15);
+    box.setRenderThroughBlocks(true);
+    return box;
+}
+fun renderBoxWhateverColorFromMap(position, color){
+    box = new BoxShape(position);
+    colorA = color.get(0);
+    colorB = color.get(1);
+    colorC = color.get(2);
+    box.setColour(colorA, colorB, colorC);
+    box.setOutlineColor(0,0,0);
+    box.setOpacity(20);
+    box.setOutlinePixelWidth(15);
+    box.setRenderThroughBlocks(true);
+    return box;
+}
+fun iterateFunJava(reach, arguments){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
+    foreach( pos: area){
+        retVal.append(renderBoxWhatever(pos));
+    }
+    return retVal;
+}
+fun iterateFunJavaColorMapping(reach, arguments){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
+    foreach( Obj: area){
+        retVal.append(renderBoxWhateverColorFromMap(Obj.get(0), Obj.get(1)));
+    }
+    return retVal;
+}
+fun getOptional(map, what){
+    if (map == null || !map.instanceOf("Map") || map.get(what) == null){
+        return null;
+    }
+    return map.get(what);
+}
+fun predicateEntity(position){
+    posBlock = world.getBlockAt(position);
+    map = posBlock.getBlockEntityData();
+    optional = getOptional(map, 'storedStack');
+    if (optional == null){
+        return false;
+    }
+    return optional.get('id').contains(string);
+}
+fun predicateEntity2(position){
+    posBlock = world.getBlockAt(position);
+    map = posBlock.getBlockEntityData();
+    optional = getOptional(map, 'SpawnData');
+    if (optional == null){
+        return false;
+    }
+    return optional.get('entity').get('id').contains('zombie');
+}
+fun predicateEntity3(position){
+    posBlock = world.getBlockAt(position);
+    cond1 = posBlock.getId().contains('something');
+    if(!cond1){
+        return false;
+    }
+    map = posBlock.getBlockEntityData();
+    optional = getOptional(map, 'Items');
+    if (optional == null){
+        return false;
+    }
+    return optional.get('Items').get(0).get('id').contains('item_');
+}
+fun iterateFunJavaPredicate(reach, function){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
+    area = world.getArea(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach));
+    foreach( pos: area){
+        if(function(pos)){
+            retVal.append(renderBoxWhatever(pos));
+        }
+    }
+    return retVal;
+}
+fun iterateFunJavaPredicateColored(reach, coloredfunction, mapping){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
+    area = world.getArea(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach));
+    foreach( pos: area){
+        color = coloredfunction(pos, mapping);
+        if(color != false){
+            retVal.append(renderBoxWhateverColorFromMap(pos, color));
+        }
+    }
+    return retVal;
+}
+fun getDistanceTo(pos){
+    return ((player.getX() - pos.getX()) ^2 + (player.getY() - pos.getY()) ^2+(player.getZ() - pos.getZ()) ^2)^0.5;
+}
+fun highlightJava(string) {
+    range = 24;
+    globalBoxes = iterateFunJava(range, string);
+    while (true){
+        foreach (boxes : globalBoxes){
+            boxes.render();
+        }
+        globalBoxesNext = iterateFunJava(range,  string);
+        foreach (boxes : globalBoxesNext){
+            boxes.render();
+        }
+        foreach (boxes : globalBoxes){
+            boxes.stopRendering();
+        }
+        globalBoxes = globalBoxesNext;
+    }
+}
+fun highlightJavaPredicate(predicate) {
+    range = 24;
+    globalBoxes = iterateFunJavaPredicate(range, predicate);
+    while (true){
+        foreach (boxes : globalBoxes){
+            boxes.render();
+        }
+        globalBoxesNext = iterateFunJavaPredicate(range,  predicate);
+        foreach (boxes : globalBoxesNext){
+            boxes.render();
+        }
+        foreach (boxes : globalBoxes){
+            boxes.stopRendering();
+        }
+        globalBoxes = globalBoxesNext;
+    }
+}
+fun highlightJavaPredicateColor(predicate, mapping) {
+    reach = 24;
+    globalBoxes = iterateFunJavaPredicateColored(reach, predicate, mapping);
+    while (true){
+        foreach (boxes : globalBoxes){
+            boxes.render();
+        }
+        globalBoxesNext = iterateFunJavaPredicateColored(reach, predicate, mapping);
+        foreach (boxes : globalBoxesNext){
+            boxes.render();
+        }
+        foreach (boxes : globalBoxes){
+            boxes.stopRendering();
+        }
+        globalBoxes = globalBoxesNext;
+    }
+}
+fun highlight(string) {
+    range = 128;
+    globalBoxes = iterateFun(range,renderBoxIf, string);
+    while (true){
+        foreach (boxes : globalBoxes){
+            boxes.render();
+        }
+        globalBoxesNext = iterateFun(range, renderBoxIf,  string);
+        foreach (boxes : globalBoxesNext){
+            boxes.render();
+        }
+        foreach (boxes : globalBoxes){
+            boxes.stopRendering();
+        }
+        globalBoxes = globalBoxesNext;
+    }
+}
+fun predicateMap(position, mappings) {
+    id = world.getBlockAt(position).getId();
+    // Flexible containsString
+    foreach (values : mappings.getKeys()){
+        if (id.contains(values)){
+            return mappings.get(values);
+        }
+    }
+    // Fixed block search
+    // if (mapping.contains(id)){
+    //    return mapping.get(id);
+    // }
+    return false;
+}
+
+fun predicate(position){
+    id = world.getBlockAt(position).getId();
+    //return id.contains('spawner');
+    return id.contains('stone');
+}
+
+
+
+mapping = {
+    'diamond' : [0, 216, 255],
+    'redstone' : [255,0,0],
+    'gold' : [255,224,0]
+};
+
+//highlightJavaPredicate(predicate);
+
+highlightJavaPredicateColor(predicateMap, mapping);
