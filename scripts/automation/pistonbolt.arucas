@@ -1,0 +1,850 @@
+import * from Minecraft;
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+playerReach = 4.5;
+accurateBlockPlacement = false;
+carefulBreakSneak = false;
+messageHolder = new MessageHolder();
+taskInterval = 10; //10ms interval
+serverPing = 150;
+trustClient = true;
+tickCount = 2;
+//Hardcode sequences
+Mapping_Diagonal =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'sticky_piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
+Mapping_Straight =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
+Mapping_Straight_v2 = {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern', 8 : 'powered_rail'};
+NORTH = new Direction('north');
+SOUTH = new Direction('south');
+WEST = new Direction('west');
+EAST = new Direction('east');
+UP = new Direction('up');
+DOWN = new Direction('down');
+
+// Functions
+fun swapToItem(itemString){
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+        return true;
+    }
+	if (itemString == "air") {
+		swapToPickaxe();
+		return false;}
+	foreach(i : [0,1,2,3,4,5,6,7,8]){
+		if(player.getItemForPlayerSlot(i).getId() == itemString){
+			player.setSelectedSlot(i);
+			return true;
+		}
+	}
+	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
+	retVal = false;
+	if (slot == null) {return false;}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    player.setSelectedSlot(slot-36);
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			player.swapPlayerSlotWithHotbar(slot);
+			player.setSelectedSlot(preslot);
+			return true;
+		}
+	}
+	return null;
+}
+fun checkItem(itemString){
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+        return true;
+    }
+	foreach(i : [0,1,2,3,4,5,6,7,8]){
+		if(player.getItemForPlayerSlot(i).getId() == itemString){
+			return true;
+		}
+	}
+	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
+	retVal = false;
+	if (slot == null) {return false;}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			return true;
+		}
+	}
+	messageHolder.sendMessage("Can't find "+ itemString+" in inventory");
+	return null;
+}
+// Swaps to pickaxe.
+fun swapToPickaxe(){
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
+        return true;
+    }
+	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
+	if (slot == null) {
+		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
+	}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    player.setSelectedSlot(slot-36);
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			player.swapPlayerSlotWithHotbar(slot);
+			player.setSelectedSlot(preslot);
+			return true;
+		}
+	}
+	return false;
+}
+fun checkPickaxe(){
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
+        return true;
+    }
+	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
+	if (slot == null) {
+		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
+	}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			return true;
+		}
+	}
+	messageHolder.sendMessage("Can't find pickaxe in inventory");
+	return false;
+}
+fun assertItem(itemString){
+    swapToItem(itemString);
+    return player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString;
+}
+
+fun assertTool(){
+    swapToPickaxe();
+    return player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains('pickaxe');
+}
+fun breakBlock(pos, requireSneak){
+	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).isFluid() || world.isAir(pos)) {return;}
+	if (world.getBlockAt(pos).getHardness() == 0) {player.attackBlock(pos,'up');sleep(20);return;}
+	if (!world.getBlockAt(pos).isReplaceable() ) {
+	assertTool();
+	while(!world.getBlockAt(pos).isReplaceable()) {
+		if (requireSneak) {player.setSneaking(true);}
+		player.updateBreakingBlock(pos);
+		if(world.getBlockAt(pos).isReplaceable()){break;}
+		sleep(50);
+	}}
+}
+fun getReverse(dir) {
+    dir = dir.uppercase();
+    if (dir == "UP") {
+        return "DOWN";
+    }
+    if (dir == "DOWN") {
+        return "UP";
+    }
+    if (dir == "EAST") {
+        return "WEST";
+    }
+    if (dir == "WEST") {
+        return "EAST";
+    }
+    if (dir == "NORTH") {
+        return "SOUTH";
+    }
+    if (dir == "SOUTH") {
+        return "NORTH";
+    }
+    return null;
+}
+
+fun applyCarpetProtocol(x,y,z,direction){
+    if (direction == null) {return [x,y,z];}
+	dirId = getDirectionId(direction);
+	return [x+2*dirId + 2, y, z];
+}
+fun getDirectionId(dir) {
+    dir = dir.fromString.uppercase();
+    if (dir == "UP") {
+        return 1;
+    }
+    if (dir == "DOWN") {
+        return 0;
+    }
+    if (dir == "EAST") {
+        return 5;
+    }
+    if (dir == "WEST") {
+        return 4;
+    }
+    if (dir == "NORTH") {
+        return 2;
+    }
+    if (dir == "SOUTH") {
+        return 3;
+    }
+    return null;
+}
+fun placeTorch(blockPos, itemString){
+
+	assertItem(itemString);
+	if (assertItem(itemString) || trustClient){
+	    x = blockPos.getX();
+	    y = blockPos.getY();
+	    z = blockPos.getZ();
+	    player.interactBlock(x,y,z,"up",x,y-1,z,false);
+	    return true;
+	}
+	return false;
+}
+fun placeDirectionBlock(blockPos,itemString,direction){
+    if(itemString.contains('torch')){
+        return placeTorch(blockPos, itemString);
+    }
+    fy = 0;
+    fp = 0;
+    lookRefdir = 'north';
+
+	if (direction != null) {
+	    dir = direction.fromString.uppercase();
+	    lookRefdir = dir;
+	    if (itemString.contains("piston") || itemString.contains("repeater")){
+	    	lookRefdir = getReverse(dir); //well actually, we might need to have testing function
+	    }
+	    fy = player.getYaw();
+	    fp = player.getPitch();
+	    if (lookRefdir  == "UP") {
+	    	fy = 0;
+	    	fp = -90;
+	    }
+	    else if (lookRefdir  == "DOWN") {
+	    	fy = 0;
+	    	fp = 90;
+	    }
+	    else if (lookRefdir  == "EAST") {
+	    	fy = -90;
+	    	fp = 0;
+	    }
+	    else if (lookRefdir  == "WEST") {
+	    	fy = 90;
+	    	fp = 0;
+	    }
+	    else if (lookRefdir  == "NORTH") {
+	    	fy = 180;
+	    	fp = 0;
+	    }
+	    else if (lookRefdir  == "SOUTH") {
+	    	fy = 0;
+	    	fp = 0;
+	    }
+	}
+	assertItem(itemString);
+	if (assertItem(itemString) || trustClient){
+	    x = blockPos.getX();
+	    y = blockPos.getY();
+	    z = blockPos.getZ();
+	    py = y;
+	    if ((direction != null && !accurateBlockPlacement) || itemString.contains("rail")) {
+	    	player.fakeLook(fy,fp,lookRefdir,1);
+	    	sleep(50);
+	    	player.interactBlock(x,py,z,lookRefdir,x,y,z,false);
+	    	if (itemString.contains("rail")){
+	    	    sleep(50);
+	    	}
+	    } else if (direction != null && accurateBlockPlacement){
+	    	carpetVec = applyCarpetProtocol(x,y,z,direction);
+	    	hx = carpetVec.get(0);
+	    	hy = carpetVec.get(1);
+	    	hz = carpetVec.get(2);
+	    	player.interactBlock(hx,hy,hz,direction.fromString,x,py,z,true);
+	    }
+	    else {
+            player.interactBlock(x,y,z,"north",x,y,z,false);
+	    }
+	    return true;
+	}
+	else {
+	    return false;
+	}
+}
+
+//classes
+class DirectionHandler{
+    //we can only handle one direction at tick
+    //implements 50-ms container that
+}
+class MessageHolder{
+    //message holding class that prevents spamming same message
+    var stringSet;
+    MessageHolder(){
+        this.stringSet = Set.of();
+    }
+    fun sendMessage(message){
+        if (this.stringSet.contains(message)){
+            return;
+        }
+        player.message(message);
+        this.stringSet.add(message);
+    }
+    fun sendMessageUnchecked(message){
+        player.message(message);
+        this.stringSet.add(message);
+    }
+}
+class Task {
+    // task that has what to do, break / item with directions
+    var pos;
+    var shouldBreak;
+    var item;
+    var block; //item.asBlock()
+    var facing;
+    var itemString;
+    var optional = 0;
+    var connectedTask = null;
+    var isExecuted = false;
+    Task(pos, itemName, direction){
+        this.pos = pos;
+        this.shouldBreak = false;
+        this.item = ItemStack.of(Material.of(itemName));
+        this.block = this.item.asBlock();
+        this.itemString = itemName;
+        this.facing = direction;
+    }
+    Task(pos){
+        this.pos = pos;
+        this.shouldBreak = true;
+        this.item = null;
+        this.facing = null;
+    }
+    Task(pos, b, i, f){
+        this.pos = pos;
+        this.shouldBreak = b;
+        if (Type.of(i).getName() == 'String'){
+            i = ItemStack.of(Material.of(i));
+        }
+        this.item = i;
+        this.itemString = i.getId();
+        this.block = i.asBlock();
+        this.facing = f;
+    }
+    Task(pos, b, i, f, optional){
+        this.pos = pos;
+        this.shouldBreak = b;
+        this.item = i;
+        this.itemString = i.getId();
+        this.block = i.asBlock();
+        this.facing = f;
+        this.optional = optional;
+    }
+    fun add(otherPos){
+        return new Task(this.pos.add(otherPos), this.shouldBreak, this.item, this.facing);
+    }
+    fun isDone(){
+    // null returns for nothing required
+        pos = this.pos.asPos();
+        if (this.shouldBreak && world.getBlockAt(pos).isReplaceable()){
+            //break task, finished
+            return null;
+        }
+        else if (this.shouldBreak && !world.getBlockAt(pos).isReplaceable()) {
+            if (this.isExecuted && trustClient){
+                return null;
+            }
+            return this;
+        }
+        else if (!this.shouldBreak && world.getBlockAt(pos).isReplaceable()){
+            //place task, but empty
+            if (this.isExecuted && trustClient){
+                return null;
+            }
+            return this;
+        }
+        state = world.getBlockAt(pos);
+        if (state.getId() != this.block.getId()){
+            //wall torch exceptions
+            if (state.getId().contains('wall')){
+                return null;
+            }
+            if (this.connectedTask != null && trustClient && this.connectedTask.isExecuted){
+                return null;
+            }
+            //place task, but break first
+            this.connectedTask = new Task(this.pos);
+            return this.connectedTask;
+        }
+        //if (this.facing != null && state.getBlockProperties().get('facing') != this.facing){
+        //    return new Task(this.pos);
+        //}
+        return null;
+    }
+    fun internalAssertItem(){
+        if (this.shouldBreak){
+            return assertTool();
+        }
+        return assertItem(this.itemString);
+    }
+    fun checkInventory(){
+        if (this.shouldBreak){
+            return checkPickaxe();
+        }
+        return checkItem(this.itemString);
+    }
+    fun internalCanProcess(){
+        if (this.pos.isNear(player)){
+         if (trustClient || this.internalAssertItem())
+            return true;
+        }
+        return false;
+        //returns if player has item or tool and reach
+    }
+    fun process(){
+    // checks, returns if processed
+        if (this.internalCanProcess()){
+            sleep(taskInterval);
+            if (this.shouldBreak){
+                breakBlock(this.pos.asPos(), carefulBreakSneak);
+                isExecuted = true;
+                return true;
+            }
+            messageHolder.sendMessage(this.formatted());
+            result = placeDirectionBlock(this.pos.asPos(),this.itemString,this.facing);
+            if (result){
+                isExecuted = true;
+                return true;
+            }
+            else {
+                messageHolder.sendMessage(this.formattedError());
+            }
+
+        }
+        return false;
+    }
+    fun finish(){
+        while (true){
+        messageHolder.sendMessage(this.formatted());
+            pendingTask = this.isDone();
+            if (pendingTask != null){
+                if (!pendingTask.checkInventory()){
+                    messageHolder.sendMessage(pendingTask.formattedError());
+                    break;
+                }
+                result = pendingTask.process();
+                if (result){
+                    if (trustClient){
+                        if (this != pendingTask){
+                            if (!pendingTask.checkInventory()){
+                                messageHolder.sendMessage(this.formattedError());
+                                break;
+                            }
+                            this.process();
+                        }
+                        break;
+                    }
+                    else {
+                        sleep(serverPing);
+                    }
+
+                }
+            }
+            else {
+                break;
+            }
+        }
+    }
+    fun formattedError(){
+        if (this.shouldBreak){
+            return 'failed to break block at '+ this.pos.formatted();
+        }
+        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted();
+    }
+    fun formatted(){
+        if (this.shouldBreak){
+            return 'break block at '+ this.pos.formatted();
+        }
+        return 'place ' + this.itemString + ' at ' + this.pos.formatted();
+    }
+    fun copy(){
+        return new Task(this.pos.copy(), this.shouldBreak, this.item, this.facing, this.optional + 1);
+    }
+}
+class CyclicTaskGenerator {
+    var previousTask = null;
+    var currentTask = null;
+    var nextTask = null;
+    var ListOfTask;
+    var blockPos;
+    var pointer;
+    var length;
+    var blockSize;
+    var cycle = 0;
+    var mapping = null;
+    //tasks : [PosWithFun(), shouldBreak, item, facing],....
+    CyclicTaskGenerator(tasks, originPos){
+        this.ListOfTask = tasks;
+        this.blockPos = new PosWithFun(originPos);
+        this.length = len(tasks);
+        this.blockSize = this.preCalculateBlockSize();
+        this.pointer = 0;
+    }
+    CyclicTaskGenerator(originPos){
+        this.ListOfTask = [];
+        this.blockPos = new PosWithFun(originPos);
+        this.length = 0;
+        this.blockSize = new PosWithFun(0,0,0);
+        this.pointer = 0;
+    }
+    fun preCalculateBlockSize(){
+        // get minX Y Z maxX Y Z
+        minPos = new PosWithFun(0,0,0);
+        maxPos = new PosWithFun(0,0,0);
+        foreach(tasks : this.ListOfTask){
+            minPos = minPos.getMinPos(tasks.pos);
+            maxPos = maxPos.getMaxPos(tasks.pos);
+        }
+        return maxPos.subtract(minPos).add(new PosWithFun(1,1,1));
+    }
+    fun poll(){
+        this.previousTask = this.currentTask;
+        if (this.pointer == this.length){
+            this.pointer = 0;
+            this.cycle ++;
+        }
+        //position
+        this.currentTask = this.ListOfTask.get(this.pointer).add(this.blockPos.add(this.blockSize.mult(this.cycle)));
+        this.pointer++;
+        return this.currentTask;
+    }
+    fun pollSafely(){
+        //returns null if its okay, task if it should do something
+        pendingTask = null;
+        if (this.previousTask != null){
+            pendingTask = this.previousTask.isDone();
+        }
+        else {
+            pendingtask = null;
+        }
+        if (pendingTask == null){
+            return this.poll();
+        }
+        return pendingTask;
+    }
+    fun execute(){
+        awaitingTask = this.pollSafely();
+        awaitingTask.finish();
+    }
+    fun addAction(position, itemstring, direction, shouldBreak){
+        if(this.mapping != null){
+            if(this.mapping.get(itemstring) != null){
+                itemstring = this.mapping.get(itemstring);
+            }
+        }
+        this.length ++;
+        this.ListOfTask.append(new Task(position, shouldBreak, itemstring, direction));
+    }
+    fun adjustOrigin(newOrigin){
+        this.blockPos = new PosWithFun(newOrigin);
+    }
+    fun attachMapping(mapping){
+        this.mapping = mapping;
+    }
+    fun getDiagonal(direction){
+        blockPos = new PosWithFun(0,0,0);
+        this.mapping = Mapping_Diagonal;
+        if (this.mapping != null){
+            yClockwise = direction.rotateYClockwise();
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction), 0, yClockwise, false); //place rail
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 0, yClockwise, false);
+            this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction), 0, yClockwise, true); //break rail
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 0, yClockwise, true);//break rail
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,2), 7, yClockwise, false); //block for pushing
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,2), 7, yClockwise, false); //block for pushing
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3), 3, yClockwise, false); //piston
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3), 3, direction, false); //piston
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4), 4, yClockwise, false); //powerable
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4), 4, yClockwise, false); //powerable
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,5), 2, direction.getOpposite(), false); //repeater
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,5), 2, yClockwise.getOpposite(), false);; //repeater
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6), 4, yClockwise, false); //powerable
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6), 4, yClockwise, false); //powerable
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction), 0, yClockwise, false); //place rail
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise), 0, yClockwise, false);//place rail
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2), 0, yClockwise, false);//place rail
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction), 0, yClockwise, true); //break rail
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise), 0, yClockwise, true); //break rail
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,2), 7, yClockwise, false); //block for pushing
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,2), 7, yClockwise, false); //block for pushing
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3), 3, yClockwise, false); //piston
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3), 3, direction, false); //piston
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,5), 6, direction, false); //dust
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,5), 6, direction, false); //dust
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
+            this.blockSize = new PosWithFun(0,0,0).offset(direction, 2).offset(yClockwise,2);
+            }
+    }
+    fun getStraightV1(direction){
+            this.mapping = Mapping_Straight;
+            blockPos = new PosWithFun(0,0,0);
+            yClockwise = direction.rotateYClockwise();
+            yCounterClockwise = direction.rotateYCounterclockwise();
+            if (direction .equals( EAST) || direction .equals( SOUTH)) {
+                    this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 3, direction, false); //place piston, facing east
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 3, direction, false); //place piston, facing east
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 4, direction, false); //place powerableBlock
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
+                    this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false); //place carpet
+                    }//new
+            if (direction .equals( WEST) || direction .equals( NORTH)){
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, false); //place torch
+                    this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, false); //place torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, true);//break rail
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 3, direction, false); //place piston, facing east
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 3, direction, false); //place piston, facing east
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 4, direction, false); //place powerableBlock
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
+                    this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false); //place carpet;//new
+            }
+            this.blockSize = blockPos.offset(direction).offset(direction);
+    }
+    fun getStraightV2(direction){
+            this.mapping = Mapping_Straight_v2;
+            blockPos = new PosWithFun(0,0,0);
+            yClockwise = direction.rotateYClockwise(); //right
+            yCounterClockwise = direction.rotateYCounterclockwise(); //left
+            this.addAction(blockPos.offset(yClockwise, 2).offset(direction), 4, direction, false); //4 powerableblock
+            this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction), 4, direction, false);
+            this.addAction(blockPos.offset(yClockwise).offset(direction), 3, direction, false); //piston
+            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, direction, false); //rail
+            this.addAction(blockPos.offset(direction, 2), 0, direction, false); //rail temporary
+            if (direction.equals(NORTH) || direction.equals(WEST)){
+                //we need torch
+                this.addAction(blockPos.offset(direction, -1).offset(yClockwise),  1,DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,UP, false); //torch
+            }
+            this.addAction(blockPos.offset(direction), 0, direction, false); //rail will be curved
+            this.addAction(blockPos.offset(direction, 0).offset(yClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
+            this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false);
+            this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false); //repeater
+            this.addAction(blockPos.offset(direction, 2), 0, DOWN, true); //break rail
+            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, yCounterClockwise, false); //place temporary powered rail
+            this.addAction(blockPos.offset(direction, 2), 8, yCounterClockwise, false); // place powered rail
+            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, DOWN, true); //break rail on piston
+            //half
+            this.addAction(blockPos.offset(yClockwise, 2).offset(direction,3), 4, direction, false); //4 powerableblock
+            this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction,3), 4, direction, false);
+            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3), 3, direction, false); //piston
+            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, yCounterClockwise, false); //rail
+            this.addAction(blockPos.offset(direction, 4), 0, direction, false); //rail temporary
+            if (direction.equals(NORTH) || direction.equals(WEST)){
+                //we need torch
+                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction, 3).offset(yClockwise),  1,UP, false); //torch placing
+            }
+            this.addAction(blockPos.offset(direction, 3), 0, direction, false); //rail will be curved
+            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
+            this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false);
+            this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false); //repeater
+            this.addAction(blockPos.offset(direction, 4).offset(yClockwise), 8, yCounterClockwise, false); //place temporary powered rail
+            this.addAction(blockPos.offset(direction, 4), 0, DOWN, true); //rail temporary remove
+            this.addAction(blockPos.offset(direction, 4), 8, yClockwise, false); //powered rail
+            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, DOWN, true); //rail
+            this.blockSize = blockPos.offset(direction, 4);
+    }
+}
+class PosWithFun {
+    var x;
+    var y;
+    var z;
+    var shape = null;
+    var render = false;
+    PosWithFun(x, y, z){
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+    PosWithFun(pos){
+        this.x = pos.getX();
+        this.y = pos.getY();
+        this.z = pos.getZ();
+    }
+    fun getX(){
+        //compat with pos
+        return this.x;
+    }
+    fun getY(){
+        return this.y;
+    }
+    fun getZ(){
+        return this.z;
+    }
+    fun add(other){
+        return new PosWithFun(this.x + other.getX(), this.y + other.getY(), this.z + other.getZ());
+    }
+    fun subtract(other){
+        return new PosWithFun(this.x - other.getX(), this.y - other.getY(), this.z - other.getZ());
+    }
+    fun distanceTo(otherPos){
+        dx = otherPos.getX() - this.x;
+        dy = otherPos.getY() - this.y;
+        dz = otherPos.getZ() - this.z;
+        return (dx ^2 + dy ^2 + dz ^2) ^ 0.5;
+    }
+    fun isNear(entity){
+        pos = entity.getPos();
+        dist = this.distanceTo(pos);
+        return dist < playerReach;
+    }
+    fun isNear(entity, distance){
+        pos = entity.getPos();
+        return this.distanceTo(pos) < distance;
+    }
+    fun mult(integer){
+        return new PosWithFun(this.x * integer, this.y * integer, this.z * integer);
+    }
+    fun asPos(){
+        return new Pos(this.x, this.y, this.z);
+    }
+    fun formatted(){
+        return 'x '+ this.x + ' y' + this.y + ' z' + this.z;
+    }
+    fun copy(){
+        return new PosWithFun(this.x, this.y, this.z);
+    }
+    fun offset(direction){
+        //south +z north -z west -x east +x
+        return this.add(direction.asVector());
+    }
+    fun offset(direction, amount){
+        return this.add(direction.asVector().mult(amount));
+    }
+    fun up(){
+        return this.add(new Direction('up'));
+    }
+    fun down(){
+        return this.add(new Direction('down'));
+    }
+    fun getMinPos(otherPos){
+        return new PosWithFun(Math.min(this.x, otherPos.x),Math.min(this.y, otherPos.y),Math.min(this.z, otherPos.z) );
+
+    }
+    fun getMaxPos(otherPos){
+        return new PosWithFun(Math.max(this.x, otherPos.x),Math.max(this.y, otherPos.y),Math.max(this.z, otherPos.z) );
+    }
+}
+class Direction {
+    var vector;
+    var pointer;
+    var fromString;
+    static var rotateYClockwiseArr = ['south', 'west', 'north', 'east'];
+    Direction(fromString){
+        fromString = fromString.lowercase();
+        if (fromString == 'south'){
+            this.vector = new PosWithFun(0,0,+1);
+            this.pointer = 0;
+        }
+        if (fromString == 'north'){
+            this.vector = new PosWithFun(0,0,-1);
+            this.pointer = 2;
+        }
+        else if (fromString == 'east'){
+            this.vector = new PosWithFun(1,0,0);
+            this.pointer = 3;
+        }
+       else if (fromString == 'west'){
+            this.vector = new PosWithFun(-1,0,0);
+            this.pointer = 1;
+        }
+       else if (fromString == 'up'){
+            this.vector = new PosWithFun(0,1,0);
+            this.pointer = null;
+        }
+       else if (fromString == 'down'){
+            this.vector = new PosWithFun(0,-1,0);
+            this.pointer = null;
+       }
+       this.fromString = fromString;
+    }
+    fun rotateYClockwise(){
+        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer + 1, 4)));
+    }
+    fun rotateYCounterclockwise(){
+        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer - 1, 4)));
+    }
+    fun getOpposite(){
+        if (this.pointer == null){
+            if (this.fromString == 'up'){
+                return new Direction('down');
+            }
+            return new Direction('up');
+        }
+        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer + 2, 4)));
+    }
+    fun getX(){
+        return this.vector.getX();
+    }
+    fun getY(){
+        return this.vector.getY();
+    }
+    fun getZ(){
+        return this.vector.getZ();
+    }
+    fun asVector(){
+        return this.vector.copy();
+    }
+    fun equals(other){
+        return this.fromString == other.fromString;
+    }
+}
+
+// Script
+//t = new Task(new PosWithFun(249,111,206), 'repeater', 'west');
+//t.finish();
+
+t = new CyclicTaskGenerator(new PosWithFun(player.getLookingAtBlock()).up());
+t.getStraightV2(new Direction('west'));
+while (true){
+    t.execute();
+}

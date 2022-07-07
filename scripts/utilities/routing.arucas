@@ -1,0 +1,117 @@
+import * from Minecraft;
+import Json from util.Json;
+
+class PosWithFun {
+    var x;
+    var y;
+    var z;
+    var shape = null;
+    var render = false;
+    PosWithFun(x, y, z){
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+    PosWithFun(pos){
+        this.x = pos.getX();
+        this.y = pos.getY();
+        this.z = pos.getZ();
+    }
+    fun getX(){
+        //compat with pos
+        return this.x;
+    }
+    fun getY(){
+        return this.y;
+    }
+    fun getZ(){
+        return this.z;
+    }
+    fun add(other){
+        return new PosWithFun(this.x + other.getX(), this.y + other.getY(), this.z + other.getZ());
+    }
+    fun subtract(other){
+        return new PosWithFun(this.x - other.getX(), this.y - other.getY(), this.z - other.getZ());
+    }
+    fun interpolate(other){
+        maxdist = 100;
+        dx = other.getX() - this.x;
+        dy = other.getY() - this.y;
+        dz = other.getZ() - this.z;
+        dist = (dx ^2 + dy ^2 + dz ^2) ^ 0.5;
+        ratio = null;
+        if (dist > maxdist){
+            ratio = maxdist / dist;
+        }
+        else {
+            ratio = 1;
+        }
+        return new PosWithFun(this.x + ratio * dx, this.y + ratio * dy, this.z + ratio * dz);
+    }
+    fun interpolate(other, ratio){
+        dx = other.getX() - this.x;
+        dy = other.getY() - this.y;
+        dz = other.getZ() - this.z;
+        return new PosWithFun(this.x + ratio * dx, this.y + ratio * dy, this.z + ratio * dz);
+    }
+    fun render(){
+        this.render = true;
+        this.shape = new BoxShape(new Pos(this.x, this.y, this.z));
+        this.shape.setRenderThroughBlocks(true);
+        this.shape.setOutlineColour(255,255,255);
+        this.shape.render();
+    }
+    fun stopRender(){
+        if (this.render){
+            this.shape.stopRendering();
+        }
+        this.render = false;
+    }
+    fun distanceTo(otherPos){
+        dx = otherPos.getX() - this.x;
+        dy = otherPos.getY() - this.y;
+        dz = otherPos.getZ() - this.z;
+        return (dx ^2 + dy ^2 + dz ^2) ^ 0.5;
+    }
+    fun isNear(entity){
+        pos = entity.getPos();
+        dist = this.distanceTo(pos);
+        near = 100;
+        return dist < near;
+    }
+    fun isNear(entity, distance){
+        pos = entity.getPos();
+        return this.distanceTo(pos) < distance;
+    }
+}
+
+file = new File('C:\\Users\\Scarlet\\Desktop\\MultiMC\\instances\\1.17\\.minecraft\\config\\EssentialClient\\Scripts\\ship.txt');
+// Format : just [[x,y,z], [x,y,z],....] or [[x,z], [x,z],....]
+listed = Json.fromString(file.read()).getValue();
+startFrom = 0;
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+
+while (true){
+    pos = listed.get(startFrom);
+    player.messageActionBar(pos);
+    objective = null;
+    if (len(pos) == 3){
+        objective = new PosWithFun(pos.get(0), pos.get(1), pos.get(2));
+    }
+    else if (len(pos) == 2) {
+        objective = new PosWithFun(pos.get(0), 100, pos.get(1));
+    }
+    else {
+        player.messageActionBar(len(pos));
+    }
+    playerPos = new PosWithFun(player.getPos());
+    renderpoint = playerPos.interpolate(objective);
+    renderpoint.render();
+    sleep(125); //8FPS
+    renderpoint.stopRender();
+    if (objective.isNear(player)){
+        startFrom ++;
+    }
+}
