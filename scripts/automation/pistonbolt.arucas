@@ -1,8 +1,8 @@
 import * from Minecraft;
 import Java from util.Internal;
-import NestedCommand from CommandLib;
-import * from PosUtils;
-import PistonUtils from PistonUtils;
+import NestedCommand from util.CommandLib;
+import * from util.PosUtils;
+import PistonUtils from util.PistonUtils;
 
 client = MinecraftClient.getClient();
 clientJava = Java.valueOf(client);
