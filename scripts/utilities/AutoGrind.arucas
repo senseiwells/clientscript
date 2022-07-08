@@ -1,0 +1,157 @@
+import * from Minecraft;
+import MaterialUtils from minecraft.MinecraftUtils; 
+
+// Config for whether it should grind netherite items
+NETHERITE_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Netherite Items",
+    "description": "Whether it should grind netherite items",
+    "default_value": false
+});
+// Config for whether it should grind elytra
+ELYTRA_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Elytra",
+    "description": "Whether it should grind elytra",
+    "default_value": false
+});
+// Config for whether it should grind flint and steel
+FLINT_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Flint&Steel",
+    "description": "Whether it should grind flint and steel",
+    "default_value": false
+});
+// Config for whether it should grind books
+BOOKS_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Books",
+    "description": "Whether it should grind books",
+    "default_value": false
+});
+// Config for whether it should grind shears
+SHEARS_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Shears",
+    "description": "Whether it should grind shears",
+    "default_value": false
+});
+// Config for whether it should grind tools
+TOOLS_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Tools",
+    "description": "Whether it should grind tools (axe, shovel, pickaxe, hoe)",
+    "default_value": true
+});
+// Config for whether it should grind weapons
+WEAPONS_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Weapons",
+    "description": "Whether it should grind weapons (sword, bow, shield, trident, crossbow)",
+    "default_value": true
+});
+// Config for whether it should grind armor
+ARMOR_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Grind Armor",
+    "description": "Whether it should grind armor",
+    "default_value": true
+});
+// Config for whether the script is active
+ACTIVE_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "AutoGrind Running",
+    "description": "Whether the auto grind is currently running",
+    "default_value": false
+});
+
+configHandler = new ConfigHandler("AutoGrindConfig", false);
+configHandler.addConfigs([NETHERITE_CONFIG, ELYTRA_CONFIG, FLINT_CONFIG, ARMOR_CONFIG, TOOLS_CONFIG, ACTIVE_CONFIG, BOOKS_CONFIG, SHEARS_CONFIG, WEAPONS_CONFIG]);
+configHandler.read();
+
+configKeybind = new KeyBind("AutoGrind Config");
+configKeybind.setKey("g");
+configKeybind.setCallback(fun() {
+    Player.get().openScreen(configHandler.createScreen(Text.of("Auto Grind Config")));
+});
+
+
+NETHERITE = Set.of(Material.NETHERITE_AXE, Material.NETHERITE_SHOVEL, Material.NETHERITE_PICKAXE, Material.NETHERITE_SWORD, Material.NETHERITE_HOE, Material.NETHERITE_HELMET, Material.NETHERITE_CHESTPLATE, Material.NETHERITE_LEGGINGS, Material.NETHERITE_BOOTS);
+
+fun getGrindable() {
+    grindable = Set.unordered();
+
+    if (BOOKS_CONFIG.getValue()) { grindable.add(Material.ENCHANTED_BOOK); }
+    if (ELYTRA_CONFIG.getValue()) { grindable.add(Material.ELYTRA); }
+    if (FLINT_CONFIG.getValue()) { grindable.add(Material.FLINT_AND_STEEL); }
+    if (SHEARS_CONFIG.getValue()) { grindable.add(Material.SHEARS); }
+    if (TOOLS_CONFIG.getValue()) {
+        grindable.addAll(MaterialUtils.getAxes());
+        grindable.addAll(MaterialUtils.getShovels());
+        grindable.addAll(MaterialUtils.getPickaxes());
+        grindable.addAll(MaterialUtils.getHoes());
+    }
+    if (WEAPONS_CONFIG.getValue()) {
+        grindable.addAll(MaterialUtils.getSwords());
+        grindable.addAll(MaterialUtils.getRangedWeapons());
+        grindable.addAll(Set.of(Material.SHIELD));
+    }
+    if (ARMOR_CONFIG.getValue()) {
+        grindable.addAll(MaterialUtils.getHelmets());
+        grindable.addAll(MaterialUtils.getChestplates());
+        grindable.addAll(MaterialUtils.getLeggings());
+        grindable.addAll(MaterialUtils.getBoots());
+    }
+    if (NETHERITE_CONFIG.getValue() == false) {
+        foreach ( item : NETHERITE ) {
+            grindable.remove(item);
+        }
+    }
+
+    return grindable;
+}
+
+
+commandSpawnable = {
+    "name" : "autoGrind",
+    "subcommands" : {
+        "start" : {
+            "" : fun() {
+                ACTIVE_CONFIG.setValue(true);
+                print("Starting AutoGrind");
+            }
+        },
+        "stop" : {
+            "" : fun() {
+                ACTIVE_CONFIG.setValue(false);
+                print("Stopping AutoGrind");
+            }
+        }
+    }
+};
+
+player = Player.get();
+
+
+MinecraftClient.getClient().addCommand(CommandBuilder.fromMap(commandSpawnable));
+
+
+while (true) {
+    if (ACTIVE_CONFIG.getValue()) {
+        if (player.getCurrentScreen() != null && player.getCurrentScreen().getName() == "Grindstone") {
+            grindable = getGrindable();
+            // Grindstone uses the slot 0 and 1 for input and 2 for output
+            for (slot = 2 ; slot < player.getTotalSlots() ; slot++) {
+                if (len(player.getItemForSlot(slot).getEnchantments()) > 0) {
+                    if (grindable.contains(player.getItemForSlot(slot).getMaterial())) {
+                        // player.shiftClickSlot(slot);
+                        player.swapSlots(0, slot);
+                        player.swapSlots(2, slot);
+                        sleep(50);
+                    }
+                }
+            }
+        }
+        sleep(100);
+    }
+}
