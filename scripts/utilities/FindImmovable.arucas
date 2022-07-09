@@ -141,7 +141,7 @@ client.addCommand(CommandBuilder.fromMap(findImmovableCommand));
 // When a block is broken and it's obsidian we stop 
 // highlighting it because it doesn't exist anymore.
 blockBreakEvent = new GameEvent("onBlockBroken", fun(block) {
-    if (immovable.contains(block.getMaterial())) {
+    if (immovables.contains(block.getMaterial())) {
         boxManager.removePosition(block.getX(), block.getY(), block.getZ());
     }
 });
