@@ -1,8 +1,8 @@
 import * from Minecraft;
 import Java from util.Internal;
-import NestedCommand from util.CommandLib;
-import * from util.PosUtils;
-import PistonUtils from util.PistonUtils;
+import LinearCommand from minecraft.CommandUtils;
+import * from minecraft.PosUtils;
+import * from minecraft.MinecraftUtils;
 
 client = MinecraftClient.getClient();
 clientJava = Java.valueOf(client);
@@ -26,12 +26,12 @@ immediateInterval = 0;
 Mapping_Diagonal =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'sticky_piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
 Mapping_Straight =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
 Mapping_Straight_v2 = {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern', 8 : 'powered_rail'};
-NORTH = new Direction('north');
-SOUTH = new Direction('south');
-WEST = new Direction('west');
-EAST = new Direction('east');
-UP = new Direction('up');
-DOWN = new Direction('down');
+NORTH = Direction.NORTH;
+SOUTH = Direction.SOUTH;
+WEST = Direction.WEST;
+EAST = Direction.EAST;
+UP = Direction.UP;
+DOWN = Direction.DOWN;
 pause = false;
 sleepInterval = 0;
 hideMessage = false;
@@ -252,56 +252,18 @@ fun isBlockInstantBreakable(pos){
     b = world.getBlockAt(pos);
     return player.getBlockBreakingSpeed(b) >= 1;
 }
-fun getReverse(dir) {
-    dir = dir.uppercase();
-    if (dir == "UP") {
-        return "DOWN";
-    }
-    if (dir == "DOWN") {
-        return "UP";
-    }
-    if (dir == "EAST") {
-        return "WEST";
-    }
-    if (dir == "WEST") {
-        return "EAST";
-    }
-    if (dir == "NORTH") {
-        return "SOUTH";
-    }
-    if (dir == "SOUTH") {
-        return "NORTH";
-    }
-    return null;
-}
 
 //Simple carpet protocol
 fun applyCarpetProtocol(x,y,z,direction){
-    if (direction == null) {return [x,y,z];}
+    if (direction == Direction.NONE) {return [x,y,z];}
 	dirId = getDirectionId(direction);
 	return [x+2*dirId + 2, y, z];
 }
 fun getDirectionId(dir) {
-    dir = dir.fromString.uppercase();
-    if (dir == "UP") {
-        return 1;
+    if (direction.isValid()){
+        return dir.ordinal();
     }
-    if (dir == "DOWN") {
-        return 0;
-    }
-    if (dir == "EAST") {
-        return 5;
-    }
-    if (dir == "WEST") {
-        return 4;
-    }
-    if (dir == "NORTH") {
-        return 2;
-    }
-    if (dir == "SOUTH") {
-        return 3;
-    }
-    return null;
+    return 0;
 }
 fun placeTorch(blockPos, itemString){
 	assertItem(itemString);
@@ -316,14 +278,14 @@ fun placeTorch(blockPos, itemString){
 }
 fun placeWallTorch(blockPos, itemString, torchFacing){
     clickPos = blockPos.offset(torchFacing.getOpposite());
-    if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.fromString)){
+    if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName())){
         messageHolder.sendMessage("position "+ clickPos.formatted() + ' does not handle wall torch.');
         return false;
     }
 	assertItem(itemString);
 	if (assertItem(itemString) || trustClient){
 	    clickVec = clickPos.getSidePos(torchFacing);
-	    player.interactBlock( clickVec.getX(), clickVec.getY(), clickVec.getZ(),torchFacing.fromString,clickPos.getX(),clickPos.getY(),clickPos.getZ(),false);
+	    player.interactBlock( clickVec.getX(), clickVec.getY(), clickVec.getZ(),torchFacing.getName(),clickPos.getX(),clickPos.getY(),clickPos.getZ(),false);
 	    messageHolder.sendDebugMessage(clickPos.formatted() + ' '+ clickVec.formatted());
 	    return true;
 	}
@@ -332,11 +294,11 @@ fun placeWallTorch(blockPos, itemString, torchFacing){
 fun requiredOffsetCheck(blockPos, itemString, torchFacing){
     //WallMountedBlock, we need library maybe?
     if (torchFacing == null){
-        torchFacing = new Direction("down");
+        torchFacing = Direction.DOWN;
     }
-    if (itemString.contains('torch') && torchFacing.axis != 'Y'){
+    if (itemString.contains('torch') && torchFacing.axis != Axis.Y){
         clickPos = blockPos.offset(torchFacing.getOpposite());
-        if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.fromString)){
+        if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName())){
             return false;
         }
     }
@@ -351,48 +313,45 @@ fun getLookRefYawPitchDirection(itemString,direction){
     }
     fy = 0;
     fp = 0;
-    lookRefDir = 'north';
-	if (direction != null) {
-	    dir = direction.fromString.uppercase();
-	    lookRefdir = dir;
+	if (direction.isValid()) {
 	    if (itemString.contains("piston") || itemString.contains("repeater")){
-	    	lookRefdir = getReverse(dir); //well actually, we might need to have testing function
+	    	direction = direction.getOpposite(); //well actually, we might need to have testing function
 	    }
 	    fy = player.getYaw();
 	    fp = player.getPitch();
-	    if (lookRefdir  == "UP") {
+	    if (direction  == Direction.UP) {
 	    	fy = 0;
 	    	fp = -90;
 	    }
-	    else if (lookRefdir  == "DOWN") {
+	    else if (direction  == Direction.DOWN) {
 	    	fy = 0;
 	    	fp = 90;
 	    }
-	    else if (lookRefdir  == "EAST") {
+	    else if (direction  == Direction.EAST) {
 	    	fy = -90;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "WEST") {
+	    else if (direction  == Direction.WEST) {
 	    	fy = 90;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "NORTH") {
+	    else if (direction  == Direction.NORTH) {
 	    	fy = 180;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "SOUTH") {
+	    else if (direction  == Direction.SOUTH) {
 	    	fy = 0;
 	    	fp = 0;
 	    }
-	    return [fy, fp, lookRefDir];
+	    return [fy, fp, direction];
 	}
 	else {
 	    return null;
 	}
 }
-fun placeDirectionBlock(blockPos,itemString,direction, immediate){
+fun placeDirectionBlock(blockPos,itemString, direction, immediate){
     if(itemString.contains('torch')){
-        if (direction.axis == "Y")
+        if (direction.axis == Axis.Y)
             return placeTorch(blockPos, itemString);
         else {
             return placeWallTorch(new PosWithFun(blockPos), itemString, direction);
@@ -400,37 +359,33 @@ fun placeDirectionBlock(blockPos,itemString,direction, immediate){
     }
     fy = 0;
     fp = 0;
-    lookRefdir = 'north';
-
-	if (direction != null) {
-	    dir = direction.fromString.uppercase();
-	    lookRefdir = dir;
+	if (direction.isValid()) {
 	    if (itemString.contains("piston") || itemString.contains("repeater")){
-	    	lookRefdir = getReverse(dir); //well actually, we might need to have testing function
+	    	direction = direction.getOpposite(); //well actually, we might need to have testing function
 	    }
 	    fy = player.getYaw();
 	    fp = player.getPitch();
-	    if (lookRefdir  == "UP") {
+	    if (direction  == Direction.UP) {
 	    	fy = 0;
 	    	fp = -90;
 	    }
-	    else if (lookRefdir  == "DOWN") {
+	    else if (direction  == Direction.DOWN) {
 	    	fy = 0;
 	    	fp = 90;
 	    }
-	    else if (lookRefdir  == "EAST") {
+	    else if (direction  == Direction.EAST) {
 	    	fy = -90;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "WEST") {
+	    else if (direction  == Direction.WEST) {
 	    	fy = 90;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "NORTH") {
+	    else if (direction  == Direction.NORTH) {
 	    	fy = 180;
 	    	fp = 0;
 	    }
-	    else if (lookRefdir  == "SOUTH") {
+	    else if (direction  == Direction.SOUTH) {
 	    	fy = 0;
 	    	fp = 0;
 	    }
@@ -442,11 +397,11 @@ fun placeDirectionBlock(blockPos,itemString,direction, immediate){
 	    z = blockPos.getZ();
 	    py = y;
 	    if ((direction != null && !accurateBlockPlacement) || itemString.contains("rail")) {
-	    	player.fakeLook(fy,fp,lookRefdir,1);
+	    	player.fakeLook(fy,fp,direction.getName(),1);
 	    	if (!immediate){
 	    	    sleep(50);
 	    	}
-	    	player.interactBlock(x,py,z,lookRefdir,x,y,z,false);
+	    	player.interactBlock(x,py,z,direction.getName(),x,y,z,false);
 	    	if (itemString.contains("rail")){
 	    	    if (!immediate){
 	    	        sleep(50);
@@ -457,7 +412,7 @@ fun placeDirectionBlock(blockPos,itemString,direction, immediate){
 	    	hx = carpetVec.get(0);
 	    	hy = carpetVec.get(1);
 	    	hz = carpetVec.get(2);
-	    	player.interactBlock(hx,hy,hz,direction.fromString,x,py,z,true);
+	    	player.interactBlock(hx,hy,hz,direction.getName(),x,py,z,true);
 	    }
 	    else {
             player.interactBlock(x,y,z,"north",x,y,z,false);
@@ -829,7 +784,7 @@ class Task {
     var shouldBreak;
     var item;
     var block; //item.asBlock()
-    var facing;
+    var facing = Direction.NONE;
     var itemString;
     var optional = 0;
     var connectedTask = null;
@@ -843,13 +798,14 @@ class Task {
         this.item = ItemStack.of(Material.of(itemName));
         this.block = this.item.asBlock();
         this.itemString = itemName;
-        this.facing = direction;
+        if (direction != null)
+            this.facing = direction;
     }
     Task(pos){
         this.pos = new PosWithFun(pos);
         this.shouldBreak = true;
         this.item = null;
-        this.facing = null;
+        this.facing = Direction.NONE;
     }
     Task(pos, b, i, f){
         this.pos = new PosWithFun(pos);
@@ -860,7 +816,8 @@ class Task {
         this.item = i;
         this.itemString = i.getId();
         this.block = i.asBlock();
-        this.facing = f;
+        if (f != null)
+            this.facing = f;
     }
     Task(pos, b, i, f, optional){
         this.pos = new PosWithFun(pos);
@@ -1037,7 +994,7 @@ class Task {
 class FakeLookWaitingTask{
     var fy;
     var fp;
-    var direction;
+    var direction = Direction.NONE;
     var predicate = fun(){return true;};
     var immediate = true;
     var isExecuted = false;
@@ -1061,7 +1018,7 @@ class FakeLookWaitingTask{
     }
     fun process(){
         if (this.internalCanProcess()){
-            player.fakeLook(this.fy, this.fp, this.direction, 1);
+            player.fakeLook(this.fy, this.fp, this.direction.getName(), 1);
             this.isExecuted = true;
             return true;
         }
@@ -1080,7 +1037,7 @@ class WaitingTask {
     var shouldBreak;
     var item;
     var block; //item.asBlock()
-    var facing;
+    var facing = Direction.NONE;
     var itemString;
     var optional = 0;
     var connectedTask = null;
@@ -1101,7 +1058,7 @@ class WaitingTask {
         this.pos = new PosWithFun(pos);
         this.shouldBreak = true;
         this.item = null;
-        this.facing = null;
+        this.facing = Direction.NONE;
         this.predicate = predicate;
     }
     WaitingTask(pos, b, i, f, predicate){
@@ -1195,7 +1152,7 @@ class WaitingTask {
                 return true;
             }
 
-            result = placeDirectionBlock(this.pos.asPos(),this.itemString,this.facing, this.isImmediate());
+            result = placeDirectionBlock(this.pos.asPos(),this.itemString, this.facing, this.isImmediate());
             if (result){
                 this.isExecuted = true;
                 messageHolder.sendDebugMessage(this.formattedSuccess());
@@ -1262,6 +1219,187 @@ class WaitingTask {
         return new WaitingTask(this.pos.copy(), this.shouldBreak, this.item, this.facing,this.predicate, this.optional + 1);
     }
 }
+
+
+//Piston Utils, only implements static methods.
+class PistonUtils{
+    static fun canExtend(world, pos, facing){
+        return world.getBlockAt(pos.offset(facing).asPos()).isReplaceable() && world.getBlockAt(pos.asPos()).isReplaceable();
+    }
+    static fun canPlaceTorchPoweringPiston(world, pos, facing){
+    //returns Facing of Torch
+        if (!world.getBlockAt(pos.asPos()).isReplaceable()){
+            return null;
+        }
+        foreach (direction : Direction.values()){
+            if (direction == facing){
+                continue;
+            }
+            if (direction.axis == Axis.Y){
+                clickPos = blockPos.down();
+                if (!world.getBlockAt(clickPos.asPos()).sideCoversSmallSquare(Direction.UP)){
+                    continue;
+                }
+            }
+            else {
+                clickPos = blockPos.offset(torchFacing.getOpposite());
+                if (!world.getBlockAt(clickPos.asPos()).sideCoversSmallSquare(facing.fromString)){
+                    continue;
+                }
+            }
+            return direction;
+        }
+        return null;
+    }
+    static fun getHorizontalQcCheck(world, offsetFromPiston, pistonPos, pistonFacing){
+        // returns new PosWithDirection(startPos, validFacing)
+        // piston offset as 'startPos', then check with rotations and offset, to power piston.
+        // means this function just iterates over piston's one side to get powering torch postion.
+        startPos = pistonPos.offset(offsetFromPiston); //we offset from piston with direction, and this direction is restricted
+	    if(PistonUtils.requiredOffsetCheck(world, startPos, 'torch', Direction.DOWN) && PistonUtils.willPowerPiston(startPos, Direction.DOWN, pistonPos, pistonFacing)) {
+            return new PosWithDirection(startPos, Direction.DOWN);
+	    }
+	    foreach (torchTestFacing : Direction.values()){
+	        if (torchTestFacing == Direction.UP || offsetFromPiston == torchTestFacing || offsetFromPiston == pistonFacing ) {
+	            continue; //restricted
+	        }
+	    	foreach(offB : [0,1]){
+	    		torchPos = startPos.up(offB);
+	    		torchAble = PistonUtils.requiredOffsetCheck(world, torchPos, 'torch', torchTestFacing);
+	    		if(torchAble && PistonUtils.willPowerPiston(torchPos, torchTestFacing, pistonPos, pistonFacing)) {
+	    			return new PosWithDirection(torchPos, torchTestFacing);
+	    	    }
+	    	}
+	    }
+	    return null;
+    }
+    static fun calculateValidTorchPos(world, pistonPos, pistonFacing){
+        foreach (directions : Direction.horizontal() ){
+            result = PistonUtils.getHorizontalQcCheck(world, directions, pistonPos, pistonFacing);
+            if (result != null){
+                return result;
+            }
+            if (!pistonFacing == Direction.UP && PistonUtils.requiredOffsetCheck(world, pistonPos.up(), 'torch', directions)){
+                return new PosWithDirection(pistonPos.up(), directions);
+            }
+        }
+        if (!pistonFacing == Direction.DOWN && PistonUtils.checkCanPlaceAt(world, pistonPos.down(), ItemStack.of(Material.of('torch')).asBlock())){
+            return new PosWithDirection(pistonPos.down(), Direction.DOWN);
+        }
+    }
+    static fun calculateBreakingPiston(world, blockPos){
+        foreach ( directions : Direction.values()){
+            pistonPos = blockPos.offset(directions);
+            finalFacing = directions.getOpposite();
+            foreach ( pistonFacing : Direction.values()){
+                if (finalFacing == pistonFacing || !PistonUtils.canExtend(world, pistonPos, pistonFacing)){
+                    continue;
+                }
+                result = PistonUtils.calculateValidTorchPos(world, pistonPos, pistonFacing);
+                if (result != null && PistonUtils.willPowerPiston(new PosWithFun(result.asPos()), result.direction, pistonPos, finalFacing)){
+                    return new RecordPiston(pistonFacing, finalFacing, result.direction, pistonPos, new PosWithFun(result.asPos()));
+                }
+            }
+        }
+        return null;
+    }
+    static fun calculateBreakingPiston(world, blockPos, finalFacing){
+        foreach ( directions : [finalFacing]){
+            pistonPos = blockPos.offset(finalFacing.getOpposite());
+            finalFacing = directions;
+            foreach ( pistonFacing : Direction.values()){
+                if (finalFacing == pistonFacing || !PistonUtils.canExtend(world, pistonPos, pistonFacing)){
+                    continue;
+                }
+                result = PistonUtils.calculateValidTorchPos(world, pistonPos, pistonFacing);
+                if (result != null && PistonUtils.willPowerPiston(new PosWithFun(result.asPos()), result.direction, pistonPos, finalFacing)){
+                    return new RecordPiston(pistonFacing, finalFacing, result.direction, pistonPos, new PosWithFun(result.asPos()));
+                }
+            }
+        }
+        return null;
+    }
+    static fun willPowerPiston(posTorch, faceTorch, posPiston, facePiston){
+	    if (posPiston.offset(facePiston).equals(posTorch)) {
+	        return false;
+	    }
+	    if (posTorch.offset(faceTorch.getOpposite()).equals(posPiston) || posTorch.offset(faceTorch.getOpposite()).equals(posPiston.up())){
+	        return false;
+	    }
+	    if (posPiston.up().equals(posTorch)){
+	        return false;
+	    }
+	    if ( posPiston.down().equals(posTorch)){
+	        return true;
+	    }
+	    if (facePiston.axis == Axis.Y){
+	        foreach ( directions : Direction.horizontal()){
+	            foreach (offsets : [0,1]){
+	                off = posPiston.offset(directions).offset(Direction.UP, offsets);
+	                if ( off.equals(posTorch)){
+	                    return true;
+	                }
+	            }
+	        }
+	    }
+	    foreach ( directions : Direction.horizontal()){
+	        foreach ( offsets : [0,1]){
+	            if (offsets == 0 && directions == facePiston && posPiston.offset(directions).equals(posTorch)){
+	                return false;
+	            }
+	            off = posPiston.offset(directions).offset(Direction.UP, offsets);
+	            if (off.equals(posTorch)){
+	                return true;
+	            }
+	        }
+	    }
+	    return false;
+    }
+    static fun requiredOffsetCheck(world, blockPos, itemString, torchFacing){
+        //WallMountedBlock, we need library maybe?
+        if (torchFacing == Direction.NONE){
+            torchFacing = Direction.DOWN;
+        }
+        if (itemString.contains('torch') && torchFacing.axis != Axis.Y){
+            clickPos = blockPos.offset(torchFacing.getOpposite());
+            if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).isReplaceable() || !world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName())){
+                return false;
+            }
+        }
+        else {
+            return PistonUtils.checkCanPlaceAt(world, blockPos, ItemStack.of(Material.of(itemString)).asBlock());
+        }
+        return true;
+    }
+    static fun checkCanPlaceAt(world, position, block){
+        if (!world.getBlockAt(position.asPos()).isReplaceable()){
+            return false;
+        }
+        jBlock = Java.valueOf(block); //blockState
+        jWorld = Java.valueOf(world);
+        jPosition = position.asJavaPos();
+        return jBlock.getBlock().canPlaceAt(jBlock, jWorld, jPosition).toArucas();
+    }
+}
+
+class RecordPiston{
+    var pistonFacing;
+    var finalFacing;
+    var torchFacing;
+    var pistonPos;
+    var torchPos;
+    RecordPiston(pistonFacing, pistonFinalFacing, torchFacing, pistonPos, torchPos){
+        this.pistonFacing = pistonFacing;
+        this.finalFacing = pistonFinalFacing;
+        this.torchFacing = torchFacing;
+        this.pistonPos = pistonPos;
+        this.torchPos = torchPos;
+    }
+    fun formatted(){
+        return 'Piston at '+ this.pistonPos.formatted() + ' with initial facing ' + this.pistonFacing.getName() + ' with final facing ' + this.finalFacing.getName() + '\nTorch at ' + this.torchPos.formatted() + ' with facing '+ this.torchFacing.fromString;
+    }
+}
+
 class CyclicTaskGenerator {
     var previousTask = null;
     var currentTask = null;
@@ -1375,14 +1513,14 @@ class CyclicTaskGenerator {
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3), 3, direction, false); //piston
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,5), 6, direction, false); //dust
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,5), 6, direction, false); //dust
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3).up(), 5, Direction.DOWN, false); //carpet
             this.blockSize = new PosWithFun(0,0,0).offset(direction, 2).offset(yClockwise,2);
             }
     }
@@ -1408,36 +1546,36 @@ class CyclicTaskGenerator {
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
                     this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, Direction.DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, Direction.DOWN, false); //place carpet
                     }//new
             if (direction .equals( WEST) || direction .equals( NORTH)){
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, false); //place torch
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, Direction.DOWN, false); //place torch
                     this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, true);//break rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, true);//break rail
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, true); //break torch
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, false); //place torch
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, Direction.DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, Direction.DOWN, false); //place torch
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, true);//break rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, true);//break rail
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, Direction.DOWN, true); //break torch
                     this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 3, direction, false); //place piston, facing east
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 3, direction, false); //place piston, facing east
                     this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
                     this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false); //place carpet;//new
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, Direction.DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, Direction.DOWN, false); //place carpet;//new
             }
             this.blockSize = blockPos.offset(direction).offset(direction);
     }
@@ -1453,17 +1591,17 @@ class CyclicTaskGenerator {
             this.addAction(blockPos.offset(direction, 2), 0, direction, false); //rail temporary
             if (direction.equals(NORTH) || direction.equals(WEST)){
                 //we need torch
-                this.addAction(blockPos.offset(direction, -1).offset(yClockwise),  1,DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction, -1).offset(yClockwise),  1,Direction.DOWN, true); //torch breaking
                 this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,UP, false); //torch
             }
             this.addAction(blockPos.offset(direction), 0, direction, false); //rail will be curved
-            this.addAction(blockPos.offset(direction, 0).offset(yClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
+            this.addAction(blockPos.offset(direction, 0).offset(yClockwise), 8, Direction.DOWN, true); //Now we can remove temporary powered rail
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false);
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false); //repeater
-            this.addAction(blockPos.offset(direction, 2), 0, DOWN, true); //break rail
+            this.addAction(blockPos.offset(direction, 2), 0, Direction.DOWN, true); //break rail
             this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, yCounterClockwise, false); //place temporary powered rail
             this.addAction(blockPos.offset(direction, 2), 8, yCounterClockwise, false); // place powered rail
-            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, DOWN, true); //break rail on piston
+            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, Direction.DOWN, true); //break rail on piston
             //half
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction,3), 4, direction, false); //4 powerableblock
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction,3), 4, direction, false);
@@ -1472,17 +1610,17 @@ class CyclicTaskGenerator {
             this.addAction(blockPos.offset(direction, 4), 0, direction, false); //rail temporary
             if (direction.equals(NORTH) || direction.equals(WEST)){
                 //we need torch
-                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,DOWN, true); //torch breaking
-                this.addAction(blockPos.offset(direction, 3).offset(yClockwise),  1,UP, false); //torch placing
+                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,Direction.DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction, 3).offset(yClockwise),  1, Direction.UP, false); //torch placing
             }
             this.addAction(blockPos.offset(direction, 3), 0, direction, false); //rail will be curved
-            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
+            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, Direction.DOWN, true); //Now we can remove temporary powered rail
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false);
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false); //repeater
             this.addAction(blockPos.offset(direction, 4).offset(yClockwise), 8, yCounterClockwise, false); //place temporary powered rail
-            this.addAction(blockPos.offset(direction, 4), 0, DOWN, true); //rail temporary remove
+            this.addAction(blockPos.offset(direction, 4), 0, Direction.DOWN, true); //rail temporary remove
             this.addAction(blockPos.offset(direction, 4), 8, yClockwise, false); //powered rail
-            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, DOWN, true); //rail
+            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, Direction.DOWN, true); //rail
             this.blockSize = blockPos.offset(direction, 4);
     }
 }
@@ -1645,14 +1783,14 @@ taskHolder = Set.of();
 fillTask = fun ( x, y, z, ex, ey, ez, itemName) {
     taskIterator = new TaskIterator();
     foreach (position : world.getArea(new Pos(x,y,z), new Pos(ex,ey,ez))){
-        taskIterator.addAction(position, itemName, null, false);
+        taskIterator.addAction(position, itemName, Direction.NONE, false);
     }
     taskHolder.add(taskIterator);
     messageHolder.sendDebugMessage('Added task length of '+taskIterator.len());
 };
 fillDirectionTask = fun ( x, y, z, ex, ey, ez, itemName, direction) {
     taskIterator = new TaskIterator();
-    direction = new Direction(direction);
+    direction = Direction.fromString(direction);
     if (!direction.isValid()){
         return null;
     }
@@ -1695,7 +1833,7 @@ toggleProtocolTask = fun (newVal){
     messageHolder.sendMessageUnchecked('AccurateBlockPlacement : '+ accurateBlockPlacement );
 };
 demiBoltTask = fun(px, py, pz, direction){
-    direction = new Direction(direction);
+    direction = Direction.fromString(direction);
     if(direction.isValid()){
         t = new CyclicTaskGenerator(new PosWithFun(px, py, pz));
         t.getStraightV2(direction);
@@ -1706,7 +1844,7 @@ demiBoltTask = fun(px, py, pz, direction){
     }
 };
 standardBoltTask = fun(px, py, pz, direction){
-    direction = new Direction(direction);
+    direction = Direction.fromString(direction);
     if(direction.isValid()){
         t = new CyclicTaskGenerator(new PosWithFun(px, py, pz));
         t.getStraightV1(direction);
@@ -1717,7 +1855,7 @@ standardBoltTask = fun(px, py, pz, direction){
     }
 };
 diagonalBoltTask = fun(px, py, pz, direction){
-    direction = new Direction(direction);
+    direction = Direction.fromString(direction);
     if(direction.isValid()){
         t = new CyclicTaskGenerator(new PosWithFun(px, py, pz));
         t.getDiagonal(direction);
@@ -1745,7 +1883,7 @@ breakingTask = fun (px, py, pz, headless){
     }
 };
 headlessTask = fun (px, py, pz, direction, headless){
-    direction = new Direction(direction);
+    direction = Direction.fromString(direction);
     if(direction.isValid()){
         recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(px, py, pz), direction);
         if (recordPiston == null){
@@ -1761,39 +1899,39 @@ headlessTask = fun (px, py, pz, direction, headless){
     }
 };
 //Register commands.
-new NestedCommand([['efill'],['x', 'Integer'],['y', 'Integer'],['z', 'Integer'],['ex', 'Integer'],['ey', 'Integer'],['ez', 'Integer'],['itemName', 'Word']], fillTask).process();
-new NestedCommand([['efill'],['x', 'Integer'],['y', 'Integer'],['z', 'Integer'],['ex', 'Integer'],['ey', 'Integer'],['ez', 'Integer'],['itemName', 'Word'], ['direction', 'Word']], fillDirectionTask).process();
-new NestedCommand([['eCommand'],['pause']], pauseTask).process();
-new NestedCommand([['eCommand'],['toggleMessage']], toggleMessageTask).process();
-new NestedCommand([['eCommand'],['AccurateBlockPlacement'], ['bool', 'Boolean']], toggleProtocolTask).process();
-new NestedCommand([['eCommand'],['toggleTrustClient']], trustClientTask).process();
-new NestedCommand([['eCommand'], ['setInterval'], ['milliseconds', 'Integer']], intervalChangeTask).process();
-new NestedCommand([['eCommand'], ['setBlockPlacmentInterval'], ['milliseconds', 'Integer']], blockIntervalChangeTask).process();
-new NestedCommand([['eCommand'], ['expectedServerPing'], ['milliseconds', 'Integer']], serverPingChangeTask).process();
-new NestedCommand([['eDemiBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], demiBoltTask).process();
-new NestedCommand([['eStandardBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], standardBoltTask).process();
-new NestedCommand([['eDiagonalBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], diagonalBoltTask).process();
-new NestedCommand([['eCommand'], ['setReachDistance'], ['reachDistance', 'Double']], reachDistanceTask).process();
-new NestedCommand([['eBedrockBreaking'],  ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['headless', 'Boolean']], breakingTask).process();
-new NestedCommand([['eBedrockBreaking'],  ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']], ['headless', 'Boolean']], headlessTask).process();
+new LinearCommand([['efill'],['x', 'Integer'],['y', 'Integer'],['z', 'Integer'],['ex', 'Integer'],['ey', 'Integer'],['ez', 'Integer'],['itemName', 'Word']], fillTask).process();
+new LinearCommand([['efill'],['x', 'Integer'],['y', 'Integer'],['z', 'Integer'],['ex', 'Integer'],['ey', 'Integer'],['ez', 'Integer'],['itemName', 'Word'], ['direction', 'Word']], fillDirectionTask).process();
+new LinearCommand([['eCommand'],['pause']], pauseTask).process();
+new LinearCommand([['eCommand'],['toggleMessage']], toggleMessageTask).process();
+new LinearCommand([['eCommand'],['AccurateBlockPlacement'], ['bool', 'Boolean']], toggleProtocolTask).process();
+new LinearCommand([['eCommand'],['toggleTrustClient']], trustClientTask).process();
+new LinearCommand([['eCommand'], ['setInterval'], ['milliseconds', 'Integer']], intervalChangeTask).process();
+new LinearCommand([['eCommand'], ['setBlockPlacmentInterval'], ['milliseconds', 'Integer']], blockIntervalChangeTask).process();
+new LinearCommand([['eCommand'], ['expectedServerPing'], ['milliseconds', 'Integer']], serverPingChangeTask).process();
+new LinearCommand([['eDemiBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], demiBoltTask).process();
+new LinearCommand([['eStandardBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], standardBoltTask).process();
+new LinearCommand([['eDiagonalBolt'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']]], diagonalBoltTask).process();
+new LinearCommand([['eCommand'], ['setReachDistance'], ['reachDistance', 'Double']], reachDistanceTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['headless', 'Boolean']], breakingTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['direction', 'Word', ['north', 'west', 'east', 'south']], ['headless', 'Boolean']], headlessTask).process();
 // Script
 //t = new Task(new PosWithFun(249,111,206), 'repeater', 'west');
 //t.finish();
 
 //t = new CyclicTaskGenerator(new PosWithFun(player.getLookingAtBlock()).up());
-//dir = new Direction('east').rotateYClockwise();
+//dir = Direction.EAST.rotateYClockwise();
 //messageHolder.sendMessage(dir.vector);
-//t.getDiagonal(new Direction('east'));
+//t.getDiagonal(Direction.EAST);
 //while (true){
 //    t.execute();
 //}
 
-//placeWallTorch(new PosWithFun(245,113,243), 'redstone_torch', new Direction('east'));
+//placeWallTorch(new PosWithFun(245,113,243), 'redstone_torch', Direction.EAST);
 
 //How to make waiting task:
 
 //task = pistonExtendRemovalTask(blockPos, facing);
-//task = pistonExtendRemovalTask(new PosWithFun(242,112,220), new Direction("up"));
+//task = pistonExtendRemovalTask(new PosWithFun(242,112,220), Direction.UP));
 
 //messageHolder.sendMessage(task.isAvailable());
 //taskIterator = new TaskIterator();
