@@ -40,7 +40,7 @@ client = MinecraftClient.getClient();
 boxManager = new SingleBoxManager();
 
 // List of immovable blocks
-immovables = [Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR]
+immovables = [Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR];
 shouldRun = false;
 searchRadius = 64;
 fromY = 0;
