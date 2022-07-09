@@ -106,8 +106,8 @@ findImmovableCommand = {
             }
         },
         "height <from> <to>" : {
-            "" : fun(from, to) {
-                fromY = from;
+            "" : fun(from_, to) {
+                fromY = from_;
                 toY = to;
             }
         }
