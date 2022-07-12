@@ -1,0 +1,167 @@
+import * from Minecraft;
+import Direction from minecraft.PosUtils;
+
+NIL_UUID = "00000000-0000-0000-0000-000000000000";
+FIRST_POS = null;
+SECOND_POS = null;
+HIDDEN = false;
+WAIT_FOR_NEXT = {};
+
+BOX = new BoxShape(0, 0, 0);
+BOX.setOpacity(0);
+BOX.setOutlinePixelWidth(5);
+BOX.setOutlineColour(255, 255, 255);
+
+fun expand(distance, direction) {
+    index = null;
+    switch (direction) {
+        case Direction.NORTH, Direction.SOUTH -> index = 2;
+        case Direction.UP, Direction.DOWN -> index = 1;
+        case Direction.EAST, Direction.WEST -> index = 0;
+    }
+    if (index == null || FIRST_POS == null || SECOND_POS == null) {
+        return;
+    }
+    first = FIRST_POS.multiply(direction.vector);
+    second = SECOND_POS.multiply(direction.vector);
+    if (first.toList()[index] > second.toList()[index]) {
+        FIRST_POS = FIRST_POS.add(direction.vector.multiply(distance, distance, distance));
+    } else {
+        SECOND_POS = SECOND_POS.add(direction.vector.multiply(distance, distance, distance));
+    }
+}
+
+fun messageToPos(message) {
+    x, y, z = message.find("(-?[0-9]+, -?[0-9]+, -?[0-9]+)")[0].split(", ");
+    return new Pos(x.toNumber(), y.toNumber(), z.toNumber());
+}
+
+fun waitForNext(message, function) {
+    WAIT_FOR_NEXT.put(message, function);
+}
+
+fun getDirection(directionString) {
+    direction = Direction.getEntityFacingFirst(Player.get());
+    if (directionString != null) {
+        argDirection = Direction.fromString(directionString);
+        if (argDirection == Direction.NONE) {
+            switch (directionString) {
+                case "left" -> direction = direction.left();
+                case "right" -> direction = direction.right();
+                case "back" -> direction = direction.opposite();
+                case "forward", "me" -> { }
+                default -> return null;
+            }
+        } else {
+            direction = argDirection;
+        }
+    }
+    return direction;
+}
+
+new GameEvent("onReceiveMessage", fun(uuid, message) {
+    try {
+        if (uuid != NIL_UUID) {
+            return;
+        }
+        if (message == "Selection cleared.") {
+            FIRST_POS = SECOND_POS = null;
+        } else if (message.contains("First position set to")) {
+            FIRST_POS = messageToPos(message);
+        } else if (message.contains("Second position set to")) {
+            SECOND_POS = messageToPos(message);
+        } else {
+            function = WAIT_FOR_NEXT.remove(message.subString(0, 15));
+            if (function != null) {
+                function();
+            }
+        }
+    } catch(error); // Not advised xD
+}); 
+
+new GameEvent("onSendMessage", fun(message) {
+    try {
+        if (message.startsWith("//")) {
+            commandArgs = message.subString(2, len(message)).split(" ");
+            commandLength = len(commandArgs);
+            switch (commandArgs[0]) {
+                case "shift" -> {
+                    distance = commandArgs[1].toNumber();
+                    directionString = null;
+                    if (commandLength == 3) {
+                        directionString = commandArgs[2];
+                    }
+                    direction = getDirection(directionString);
+                    if (direction == null) {
+                        return;
+                    }
+                    waitForNext("Region shifted.", fun() {
+                        if (FIRST_POS == null || SECOND_POS == null) {
+                            return;
+                        }
+                        shift = direction.vector.multiply(distance, distance, distance);
+                        FIRST_POS = FIRST_POS.add(shift);
+                        SECOND_POS = SECOND_POS.add(shift);
+                    });
+                }
+                case "expand" -> {
+                    if (commandArgs[1] == "vert") {
+                        if (commandLength != 3) {
+                            return;
+                        }
+                        distance = Math.abs(commandArgs[2].toNumber());
+                        waitForNext("Region expanded", fun() {
+                            expand(distance, Direction.UP);
+                            expand(distance, Direction.DOWN);
+                        });
+                        return;
+                    }
+                    distance = commandArgs[1].toNumber();
+                    directionString = null;
+                    if (commandLength == 3) {
+                        directionString = commandArgs[2];
+                    }
+                    direction = getDirection(directionString);
+                    if (direction == null) {
+                        return;
+                    }
+                    waitForNext("Region expanded", fun() {
+                        expand(distance, direction);
+                    });
+                }
+            }
+        }
+    } catch(error); // This is not advised xD
+});
+
+worldEditCommand = {
+    "name": "worldEditCUI",
+    "subcommands": {
+        "hidden <boolean>": {
+            "": fun(bool) {
+                HIDDEN = bool;
+            }
+        },
+        "renderThrough <boolean>": {
+            "": fun(bool) {
+                BOX.setRenderThroughBlocks(bool);
+            }
+        }
+    },
+    "arguments": {
+        "boolean": {"type": "Boolean"}
+    }
+};
+
+MinecraftClient.get().addCommand(worldEditCommand);
+
+while (true) {
+    if (HIDDEN || FIRST_POS == null || SECOND_POS == null) {
+        BOX.stopRendering();
+    } else {
+        BOX.setPos1(FIRST_POS);
+        BOX.setPos2(SECOND_POS);
+        BOX.render();
+    }
+    sleep(100);
+}
