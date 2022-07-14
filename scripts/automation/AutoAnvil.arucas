@@ -115,7 +115,7 @@ fun runRecording(name, repeat) {
             switch (Type.of(anvilResult)) {
                 case Number.type -> {
                     if (!IGNORE_FAILURES.getValue()) {
-                        print("You need " + anvilResult + " levels"));
+                        print("You need " + anvilResult + " levels");
                         running = false;
                         return;
                     }
