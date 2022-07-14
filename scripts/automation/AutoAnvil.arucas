@@ -1,6 +1,7 @@
 import * from Minecraft;
 import Collector from util.Collection;
 import Json from util.Json;
+import Java from util.Internal;
 
 DELAY_CONFIG = Config.fromMap({
     "type": "integer_slider",
@@ -158,7 +159,7 @@ command = {
                         return;
                     }
                     currentRecording = generateRecording(name);
-                    print("To stop recording us '/autoanvil record stop'");
+                    print("To stop recording use '/autoanvil record stop'");
                 }
             },
             "stop": {
@@ -219,12 +220,15 @@ client.addCommand(command);
 
 new GameEvent("onAnvil", fun(first, second, result, name, level) {
     if (currentRecording != null) {
+        if (Java.valueOf(name) == null || name == null) {
+            name = "";
+        }
         currentRecording["steps"].append({
             "first": first.getFullId() + first.getNbtAsString(),
             "second": second.getFullId() + second.getNbtAsString(),
             "name": name
         });
-        print("Recorded anvil data: " +first.getId() + " + " + second.getId() + " -> " + result.getId() + " with name: " + name);
+        print("Recorded anvil data: " + first.getId() + " + " + second.getId() + " -> " + result.getId() + " with name: " + name);
     }
 });
 
