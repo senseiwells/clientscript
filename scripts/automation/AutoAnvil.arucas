@@ -67,6 +67,19 @@ fun getAnvilPos(player) {
     return null;
 }
 
+fun checkAnvilOrBlock() {
+    player = Player.get();
+    screen = player.getCurrentScreen();
+    while (!player.isSneaking() && (screen == null || screen.getName() != "Anvil")) {
+        pos = getAnvilPos(player);
+        if (pos != null) {
+            player.interactBlock(pos, "up");
+        }
+        sleep(200 + 50 * DELAY_CONFIG.getValue());
+        screen = player.getCurrentScreen();
+    }
+}
+
 fun runRecording(name, repeat) {
     if (running) {
         print("Anvilling is already running");
@@ -103,6 +116,12 @@ fun runRecording(name, repeat) {
     sleep(200 + 50 * DELAY_CONFIG.getValue());
     while (running) {
         foreach (step : steps) {
+            checkAnvilOrBlock();
+            if (player.isSneaking()) {
+                running = false;
+                return;
+            }
+
             firstStack = step["first"];
             secondStack = step["second"];
 
@@ -129,6 +148,7 @@ fun runRecording(name, repeat) {
                     }
                 }
             }
+
             sleep(50 * DELAY_CONFIG.getValue());
         }
 
@@ -136,8 +156,9 @@ fun runRecording(name, repeat) {
             player.dropAllExact(drop);
         }
 
-        if (!repeat) {
-            break;
+        if (!repeat || player.isSneaking()) {
+            running = false;
+            return;
         }
     }
     
@@ -159,7 +180,7 @@ command = {
                         return;
                     }
                     currentRecording = generateRecording(name);
-                    print("To stop recording use '/autoanvil record stop'");
+                    print("To stop recording us '/autoanvil record stop'");
                 }
             },
             "stop": {
