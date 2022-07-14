@@ -115,7 +115,7 @@ fun runRecording(name, repeat) {
             switch (Type.of(anvilResult)) {
                 case Number.type -> {
                     if (!IGNORE_FAILURES.getValue()) {
-                        print("You need %s levels".format(anvilResult));
+                        print("You need " + anvilResult + " levels"));
                         running = false;
                         return;
                     }
@@ -154,7 +154,7 @@ command = {
                         return;
                     }
                     if (getRecordingNames().contains(name)) {
-                        print("You already have a recording named '%s'".format(name));
+                        print("You already have a recording named '" + name + "'");
                         return;
                     }
                     currentRecording = generateRecording(name);
@@ -196,11 +196,11 @@ command = {
                     recording = savedRecordings[i];
                     if (recording["name"] == name) {
                         savedRecordings.remove(i);
-                        print("Successfully removed '%s'".format(name));
+                        print("Successfully removed '" + name + "'");
                         return;
                     }
                 }
-                print("Could not find '%s'".format(name));
+                print("Could not find '" + name + "'");
             }
         }
     },
@@ -224,14 +224,14 @@ new GameEvent("onAnvil", fun(first, second, result, name, level) {
             "second": second.getFullId() + second.getNbtAsString(),
             "name": name
         });
-        print("Recorded anvil data: %s + %s -> %s with name: %s".format(first.getId(), second.getId(), result.getId(), name));
+        print("Recorded anvil data: " +first.getId() + " + " + second.getId() + " -> " + result.getId() + " with name: " + name);
     }
 });
 
 new GameEvent("onClickSlot", fun(slot, action, item) {
     if (currentRecording != null && action == "THROW") {
         currentRecording["drops"].append(item.getFullId() + item.getNbtAsString());
-        print("Recorded dropped item: %s".format(item.getId()));
+        print("Recorded dropped item: " + item.getId());
     }
 });
 
