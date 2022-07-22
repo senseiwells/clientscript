@@ -1,0 +1,269 @@
+import * from Minecraft;
+import Collector from util.Collection;
+import Json from util.Json;
+import Java from util.Internal;
+
+DELAY_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Delay Between Anvils",
+    "description": "The higher your ping the more delay (in ticks) you should have for a smooth experience",
+    "default_value": 1,
+    "max": 100,
+    "min": 0
+});
+IGNORE_FAILURES = Config.fromMap({
+    "type": "boolean",
+    "name": "Ignore Failures",
+    "description": "This stops the anviling process from stopping if you could not enchant an item",
+    "default_value": false
+});
+
+configHandler = new ConfigHandler("AutoAnvilConfig", false);
+configHandler.addConfigs([DELAY_CONFIG, IGNORE_FAILURES]);
+configHandler.read();
+
+configKeybind = new KeyBind("AutoAnvil Config");
+configKeybind.setKeys(["a", "c"]);
+configKeybind.setCallback(fun() {
+    Player.get().openScreen(configHandler.createScreen(Text.of("Auto Anvil Config")));
+});
+
+client = MinecraftClient.get();
+
+file = new File(client.getScriptsPath() + "/AnvilRecording");
+file.createDirectory();
+file = new File(client.getScriptsPath() + "/AnvilRecording/saved.json");
+savedRecordings = null;
+
+if (file.exists()) {
+    savedRecordings = Json.fromString(file.read()).getValue();
+} else {
+    savedRecordings = [];
+}
+
+currentRecording = null;
+running = false;
+
+fun generateRecording(name) {
+    return {
+        "name": name,
+        "steps": [],
+        "drops": []
+    };
+}
+
+fun getRecordingNames() {
+    return Collector.of(savedRecordings).map(fun(m) { return m["name"]; }).toList();
+}
+
+fun getAnvilPos(player) {
+    playerPos = player.getPos();
+    blocks = player.getWorld().getAreaOfBlocks(playerPos.subtract(5, 5, 5), playerPos.add(5, 5, 5));
+    foreach (block : blocks) {
+        switch (block.getId()) {
+            case "anvil", "chipped_anvil", "damaged_anvil" -> return block.getPos();
+        }
+    }
+    return null;
+}
+
+fun checkAnvilOrBlock() {
+    player = Player.get();
+    screen = player.getCurrentScreen();
+    while (!player.isSneaking() && (screen == null || screen.getName() != "Anvil")) {
+        pos = getAnvilPos(player);
+        if (pos != null) {
+            player.interactBlock(pos, "up");
+        }
+        sleep(200 + 50 * DELAY_CONFIG.getValue());
+        screen = player.getCurrentScreen();
+    }
+}
+
+fun runRecording(name, repeat) {
+    if (running) {
+        print("Anvilling is already running");
+        return;
+    }
+
+    player = Player.get();
+    pos = getAnvilPos(player);
+    if (pos == null) {
+        print("Cannot find anvil nearby");
+        return;
+    }
+
+    result = Collector.of(savedRecordings).filter(fun(m) { return m["name"] == name; }).toList();
+    if (result.isEmpty()) {
+        print("There are no recordings with the name '%s'".format(name));
+        return;
+    }
+
+    steps = [];
+    foreach (step : result[0]["steps"]) {
+        firstStack = ItemStack.parse(step["first"]);
+        secondStack = ItemStack.parse(step["second"]);
+        steps.append({
+            "first": firstStack,
+            "second": secondStack,
+            "name": step["name"]
+        });
+    }
+    drops = Collector.of(result[0]["drops"]).map(fun(s) { return ItemStack.parse(s); }).toList();
+
+    running = true;
+    player.interactBlock(pos, "up");
+    sleep(200 + 50 * DELAY_CONFIG.getValue());
+    while (running) {
+        foreach (step : steps) {
+            checkAnvilOrBlock();
+            if (player.isSneaking()) {
+                running = false;
+                return;
+            }
+
+            firstStack = step["first"];
+            secondStack = step["second"];
+
+            anvilResult = player.anvil(
+                fun(stack) { return stack == firstStack && stack.isNbtEqual(firstStack); }, 
+                fun(stack) { return stack == secondStack && stack.isNbtEqual(secondStack); },
+                false
+            );
+            player.anvilRename(step["name"], fun(i) { return false; });
+
+            switch (Type.of(anvilResult)) {
+                case Number.type -> {
+                    if (!IGNORE_FAILURES.getValue()) {
+                        print("You need " + anvilResult + " levels");
+                        running = false;
+                        return;
+                    }
+                }
+                case Boolean.type -> {
+                    if (!anvilResult && !IGNORE_FAILURES.getValue()) {
+                        print("Anvil was not successful, maybe you ran out of items?");
+                        running = false;
+                        return;
+                    }
+                }
+            }
+
+            sleep(50 * DELAY_CONFIG.getValue());
+        }
+
+        foreach (drop : drops) {
+            player.dropAllExact(drop);
+        }
+
+        if (!repeat || player.isSneaking()) {
+            running = false;
+            return;
+        }
+    }
+    
+    running = false;
+}
+
+command = {
+    "name": "autoanvil",
+    "subcommands": {
+        "record": {
+            "start <name>": {
+                "": fun(name) {
+                    if (currentRecording != null) {
+                        print("You are already currently recording");
+                        return;
+                    }
+                    if (getRecordingNames().contains(name)) {
+                        print("You already have a recording named '" + name + "'");
+                        return;
+                    }
+                    currentRecording = generateRecording(name);
+                    print("To stop recording us '/autoanvil record stop'");
+                }
+            },
+            "stop": {
+                "": fun() {
+                    if (currentRecording == null) {
+                        print("You are not currently recording");
+                        return;
+                    }
+                    savedRecordings.append(currentRecording);
+                    data = Json.fromList(savedRecordings);
+                    data.writeToFile(file);
+                    print("Saved recording");
+                    currentRecording = null;
+                }
+            }
+        },
+        "run <recording>": {
+            "": fun(name) {
+                runRecording(name, false);
+            },
+            "repeat": {
+                "": fun(name) {
+                    runRecording(name, true);
+                }
+            }
+        },
+        "stop": {
+            "": fun() {
+                running = false;
+            }
+        },
+        "remove <recording>": {
+            "": fun(name) {
+                for (i = 0; i < len(savedRecordings); i++) {
+                    recording = savedRecordings[i];
+                    if (recording["name"] == name) {
+                        savedRecordings.remove(i);
+                        print("Successfully removed '" + name + "'");
+                        return;
+                    }
+                }
+                print("Could not find '" + name + "'");
+            }
+        }
+    },
+    "arguments": {
+        "name": {"type": "word"},
+        "recording": {
+            "type": "word",
+            "suggester": fun(args...) {
+                return getRecordingNames();
+            }
+        }
+    }
+};
+
+client.addCommand(command);
+
+new GameEvent("onAnvil", fun(first, second, result, name, level) {
+    if (currentRecording != null) {
+        if (Java.valueOf(name) == null || name == null) {
+            name = "";
+        }
+        currentRecording["steps"].append({
+            "first": first.getFullId() + first.getNbtAsString(),
+            "second": second.getFullId() + second.getNbtAsString(),
+            "name": name
+        });
+        print("Recorded anvil data: " + first.getId() + " + " + second.getId() + " -> " + result.getId() + " with name: " + name);
+    }
+});
+
+new GameEvent("onClickSlot", fun(slot, action, item) {
+    if (currentRecording != null && action == "THROW") {
+        currentRecording["drops"].append(item.getFullId() + item.getNbtAsString());
+        print("Recorded dropped item: " + item.getId());
+    }
+});
+
+new GameEvent("onScriptEnd", fun() {
+    data = Json.fromList(savedRecordings);
+    data.writeToFile(file);
+    print("Saved all AutoAnvil recordings");
+});
+
+hold();

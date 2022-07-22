@@ -40,14 +40,14 @@ client = MinecraftClient.getClient();
 boxManager = new SingleBoxManager();
 
 // List of immovable blocks
-immovables = [Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR]
+immovables = Set.of(Material.OBSIDIAN, Material.ENDER_CHEST, Material.CRYING_OBSIDIAN, Material.ANVIL, Material.CHIPPED_ANVIL, Material.DAMAGED_ANVIL, Material.RESPAWN_ANCHOR, Material.SPAWNER);
 shouldRun = false;
 searchRadius = 64;
 fromY = 0;
 toY = 64;
 
-// Main function that is used to find obsidian
-fun findObsidian() {
+// Main function that is used to find immovables
+fun findImmovable() {
     player = Player.get();
     world = client.getWorld();
     x = player.getX().floor();
@@ -65,8 +65,7 @@ fun findObsidian() {
                 block = world.getBlockAt(i, j, h);
                 if (immovables.contains(block.getMaterial())) {
                     boxManager.addPosition(i, j, h);
-                }
-                else {
+                } else {
                     boxManager.removePosition(i, j, h);
                 }
             }
@@ -106,8 +105,8 @@ findImmovableCommand = {
             }
         },
         "height <from> <to>" : {
-            "" : fun(from, to) {
-                fromY = from;
+            "" : fun(from_, to) {
+                fromY = from_;
                 toY = to;
             }
         }
@@ -141,7 +140,7 @@ client.addCommand(CommandBuilder.fromMap(findImmovableCommand));
 // When a block is broken and it's obsidian we stop 
 // highlighting it because it doesn't exist anymore.
 blockBreakEvent = new GameEvent("onBlockBroken", fun(block) {
-    if (immovable.contains(block.getMaterial())) {
+    if (immovables.contains(block.getMaterial())) {
         boxManager.removePosition(block.getX(), block.getY(), block.getZ());
     }
 });
@@ -151,7 +150,7 @@ blockBreakEvent.register();
 // Core loop
 while (true) {
     if (shouldRun) {
-        findObsidian();
+        findImmovable();
     }
     // We sleep so we don't set our computer on fire
     sleep(1000);
