@@ -23,21 +23,42 @@ fun getIterator(start, end, num){
     }
     return ret;
 }
-fun iterateFun(reach, function, arguments){
+fun iterateFun(xreach,yreach, zreach, function, arguments){
     retVal = [];
     sx = player.getX().round();
     sy = player.getY().round();
     sz = player.getZ().round();
-    SxL = getIterator(sx-reach, sx+reach, 1);
-    SyL = getIterator(sy-reach, sy+reach, 1);
-    SzL = getIterator(sz-reach, sz+reach, 1);
+    SxL = getIterator(sx-xreach, sx+xreach, 1);
+    SyL = getIterator(sy-yreach, sy+yreach, 1);
+    SzL = getIterator(sz-zreach, sz+zreach, 1);
     foreach (Sx : SxL) {
         foreach (Sy : SyL ) {
             foreach (Sz : SzL) {
                 pos = new Pos(Sx,Sy,Sz);
                 box = function(pos, arguments);
-                if (box != null) {
+                if (box != null && box != false) {
                     retVal.append(box);
+                }
+            }
+        }
+    }
+    return retVal;
+}
+fun iterateFun(xreach,yreach, zreach, function, arguments, apply){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    SxL = getIterator(sx-xreach, sx+xreach, 1);
+    SyL = getIterator(sy-yreach, sy+yreach, 1);
+    SzL = getIterator(sz-zreach, sz+zreach, 1);
+    foreach (Sx : SxL) {
+        foreach (Sy : SyL ) {
+            foreach (Sz : SzL) {
+                pos = new Pos(Sx,Sy,Sz);
+                result = function(pos, arguments);
+                if (result != null && result != false) {
+                    retVal.append(apply(pos, result));
                 }
             }
         }
@@ -176,16 +197,10 @@ fun iterateFunJavaPredicateColored(coloredfunction, mapping){
     sy = player.getY().round();
     sz = player.getZ().round();
     //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
-    tt = getMilliTime();
-    area = world.getArea(new Pos(sx-xreach, sy-yreach, sz-zreach), new Pos(sx+xreach, sy+yreach, sz+zreach));
+    //tt = getMilliTime();
+    //area = world.getArea(new Pos(sx-xreach, sy-yreach, sz-zreach), new Pos(sx+xreach, sy+yreach, sz+zreach));
     //player.messageActionBar("preparing " + ((2* reach+1)^3) + " blocks list took" + (getMilliTime() - tt)+ "ms");
-    foreach( pos: area){
-        color = coloredfunction(pos, mapping);
-        if(color != false){
-            retVal.append(renderBoxWhateverColorFromMap(pos, color));
-        }
-    }
-    return retVal;
+    return iterateFun(xreach,yreach, zreach, coloredfunction, mapping, renderBoxWhateverColorFromMap);
 }
 fun iterateFunJavaPredicateColoredBlock(coloredfunctionBlock, mapping){
     retVal = [];
@@ -194,15 +209,7 @@ fun iterateFunJavaPredicateColoredBlock(coloredfunctionBlock, mapping){
     sz = player.getZ().round();
     //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
     tt = getMilliTime();
-    area = world.getAreaOfBlocks(new Pos(sx-xreach, sy-yreach, sz-zreach), new Pos(sx+xreach, sy+yreach, sz+zreach));
-    //player.messageActionBar("preparing " + ((2* reach+1)^3) + " blocks list took" + (getMilliTime() - tt)+ "ms");
-    foreach( blocks: area){
-        color = coloredfunctionBlock(blocks, mapping);
-        if(color != false){
-            retVal.append(renderBoxWhateverColorFromMapBlock(blocks, color));
-        }
-    }
-    return retVal;
+    return iterateFun(xreach,yreach, zreach, coloredfunctionBlock, mapping, renderBoxWhateverColorFromMapBlock);
 }
 fun getDistanceTo(pos){
     return ((player.getX() - pos.getX()) ^2 + (player.getY() - pos.getY()) ^2+(player.getZ() - pos.getZ()) ^2)^0.5;
@@ -384,9 +391,9 @@ addSearchRGBTask = fun (newVal,r,g,b){
     player.message("Toggled " +newVal + " search");
 };
 removeSearchTask = fun (val){
-    if (mapping.contains(val)){
+    if (mapping.getKeys().contains(val)){
         mapping.remove(val);
-        player.message("Removed " +newVal + " search");
+        player.message("Removed " +val + " search");
     }
 
 };
