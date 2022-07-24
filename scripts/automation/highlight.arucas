@@ -1,6 +1,9 @@
 import * from Minecraft;
-import LinearCommand from minecraft.CommandUtils;
+import Java from util.Internal;
+import * from minecraft.CommandUtils;
+import * from minecraft.AreaParallelUtils;
 import RGB from minecraft.ColorCodes;
+import * from minecraft.PosUtils;
 client = MinecraftClient.getClient();
 player = client.getPlayer();
 world = client.getWorld();
@@ -8,96 +11,74 @@ reach = 32;
 xreach = 32;
 yreach = 32;
 zreach = 32;
+xThreads = 2;
+yThreads = 2;
+zThreads = 2;
 safetyLimit = 20000000;
-
+StreamSupportStream = Java.getStaticMethodDelegate("java.util.stream.StreamSupport", "stream", 2);
+BlockPosIterate = Java.getStaticMethodDelegate("net.minecraft.util.math.BlockPos","iterate", 2);
+CollectorList = Java.getStaticMethodDelegate('java.util.stream.Collectors', "toList", 0);
+BooleanValueOf = Java.getStaticMethodDelegate('java.lang.Boolean', 'valueOf', 1);
 globalBoxes = {};
-fun getIterator(start, end, num){
-    ii = 0;
-    maxlen = 1000000;
-    ret = [start];
-    c = start;
-    while (c < end && ii < maxlen){
-        c = c+num;
-        ret.append(c);
-        ii = ii+1;
-    }
-    return ret;
-}
-fun iterateFun(xreach,yreach, zreach, function, arguments){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    SxL = getIterator(sx-xreach, sx+xreach, 1);
-    SyL = getIterator(sy-yreach, sy+yreach, 1);
-    SzL = getIterator(sz-zreach, sz+zreach, 1);
-    foreach (Sx : SxL) {
-        foreach (Sy : SyL ) {
-            foreach (Sz : SzL) {
-                pos = new Pos(Sx,Sy,Sz);
-                box = function(pos, arguments);
-                if (box != null && box != false) {
-                    retVal.append(box);
-                }
-            }
-        }
-    }
-    return retVal;
-}
 fun iterateFun(xreach,yreach, zreach, function, arguments, apply){
     retVal = [];
     sx = player.getX().round();
     sy = player.getY().round();
     sz = player.getZ().round();
-    SxL = getIterator(sx-xreach, sx+xreach, 1);
-    SyL = getIterator(sy-yreach, sy+yreach, 1);
-    SzL = getIterator(sz-zreach, sz+zreach, 1);
-    foreach (Sx : SxL) {
-        foreach (Sy : SyL ) {
-            foreach (Sz : SzL) {
-                pos = new Pos(Sx,Sy,Sz);
-                result = function(pos, arguments);
-                if (result != null && result != false) {
-                    retVal.append(apply(pos, result));
-                }
-            }
-        }
+    areas = new DivideArea(new PosWithFun(sx-xreach, sy-yreach, sz-zreach), new PosWithFun(sx+xreach, sy+yreach, sz+zreach)).divideBy(xThreads,yThreads,zThreads);
+    lazyValues = [];
+    i = 0;
+    foreach (Area : areas){
+        //player.message(Area.format());
+        _i = i;
+        lambdaAsync = fun (){
+            //print("started Thread " + _i + " Area size : "+Area.getSize() + " at "+ getMilliTime());
+            streamInit = BlockPosIterate(Area.pos1.asJavaPos(), Area.pos2.asJavaPos()).spliterator();
+            result =  StreamSupportStream(streamInit, Java.valueOf(false)).
+                filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
+                map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
+                filter(Java.predicateOf(fun(a){return a != false && a != null;})).
+                collect(CollectorList()).toArucas();
+            //print("finished Thread " + _i+ " at "+ getMilliTime());
+            return result;
+            };
+        lazyValues.append(Thread.runAsync(lambdaAsync));
+        i ++;
     }
+    foreach(values : lazyValues){
+        retVal.addAll(values);
+    }
+    //stop();
     return retVal;
 }
-fun asString(position){
-    return ''+ position.getX().round() + ':'+ position.getY().round()+ ':' + position.getZ().round();
+fun iterateFunDirect(xreach,yreach, zreach, function, arguments, apply){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    streamInit = BlockPosIterate(new PosWithFun(sx-xreach, sy-yreach, sz-zreach).asJavaPos(), new PosWithFun(sx+xreach, sy+yreach, sz+zreach).asJavaPos()).spliterator();
+    return StreamSupportStream(streamInit, Java.valueOf(false)).
+                filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
+                map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
+                filter(Java.predicateOf(fun(a){return a != false && a != null;})).
+                collect(CollectorList()).toArucas();
+
 }
-fun asBlockPos(string){
-    xyz = string.split(':');
-    return new Pos(xyz.get(0).toNumber(),xyz.get(1).toNumber(),xyz.get(2).toNumber());
-}
-fun renderBoxIf(position, containsString){
-    if (world.getBlockAt(position).getId().contains(containsString)){
-        box = new BoxShape(position);
-        box.setOutlineColor(255,0,0);
-        box.setOpacity(120);
-        box.setRenderThroughBlocks(true);
-        return box;
-    }
-}
-fun renderBoxWhatever(position){
-    box = new BoxShape(position);
-    box.setColour(255,0,0);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
-    return box;
-}
-fun renderBoxWhateverColor(position, colorA, colorB, colorC){
-    box = new BoxShape(position);
-    box.setColour(colorA, colorB, colorC);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
-    return box;
+fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
+    retVal = [];
+    sx = player.getX().round();
+    sy = player.getY().round();
+    sz = player.getZ().round();
+    lambda  = fun (){
+    streamInit = BlockPosIterate(new PosWithFun(sx-xreach, sy-yreach, sz-zreach).asJavaPos(), new PosWithFun(sx+xreach, sy+yreach, sz+zreach).asJavaPos()).spliterator();
+    return StreamSupportStream(streamInit, Java.valueOf(false)).
+                filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
+                map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
+                filter(Java.predicateOf(fun(a){return a != false && a != null;})).
+                collect(CollectorList()).toArucas();
+    };
+    lazyValue = Thread.runAsync(lambda);
+    return lazyValue;
 }
 fun renderBoxWhateverColorFromMap(position, color){
     box = new BoxShape(position);
@@ -108,145 +89,16 @@ fun renderBoxWhateverColorFromMap(position, color){
     box.setRenderThroughBlocks(true);
     return box;
 }
-fun renderBoxWhateverColorFromMapBlock(blocks, color){
-    position = blocks.getPos();
-    box = new BoxShape(position);
-    box.setColour(color.hexcode);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
-    return box;
-}
-fun iterateFunJava(reach, arguments){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
-    foreach( pos: area){
-        retVal.append(renderBoxWhatever(pos));
-    }
-    return retVal;
-}
-fun iterateFunJavaColorMapping(reach, arguments){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
-    foreach( Obj: area){
-        retVal.append(renderBoxWhateverColorFromMap(Obj.get(0), Obj.get(1)));
-    }
-    return retVal;
-}
-fun getOptional(map, what){
-    if (map == null || !map.instanceOf("Map") || map.get(what) == null){
-        return null;
-    }
-    return map.get(what);
-}
-fun predicateEntity(position){
-    posBlock = world.getBlockAt(position);
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'storedStack');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('id').contains(string);
-}
-fun predicateEntity2(position){
-    posBlock = world.getBlockAt(position);
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'SpawnData');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('entity').get('id').contains('zombie');
-}
-fun predicateEntity3(position){
-    posBlock = world.getBlockAt(position);
-    cond1 = posBlock.getId().contains('something');
-    if(!cond1){
-        return false;
-    }
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'Items');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('Items').get(0).get('id').contains('item_');
-}
-fun iterateFunJavaPredicate(reach, function){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
-    area = world.getArea(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach));
-    foreach( pos: area){
-        if(function(pos)){
-            retVal.append(renderBoxWhatever(pos));
-        }
-    }
-    return retVal;
-}
 fun iterateFunJavaPredicateColored(coloredfunction, mapping){
     retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
     //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
     //tt = getMilliTime();
     //area = world.getArea(new Pos(sx-xreach, sy-yreach, sz-zreach), new Pos(sx+xreach, sy+yreach, sz+zreach));
     //player.messageActionBar("preparing " + ((2* reach+1)^3) + " blocks list took" + (getMilliTime() - tt)+ "ms");
     return iterateFun(xreach,yreach, zreach, coloredfunction, mapping, renderBoxWhateverColorFromMap);
 }
-fun iterateFunJavaPredicateColoredBlock(coloredfunctionBlock, mapping){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
-    tt = getMilliTime();
-    return iterateFun(xreach,yreach, zreach, coloredfunctionBlock, mapping, renderBoxWhateverColorFromMapBlock);
-}
 fun getDistanceTo(pos){
     return ((player.getX() - pos.getX()) ^2 + (player.getY() - pos.getY()) ^2+(player.getZ() - pos.getZ()) ^2)^0.5;
-}
-fun highlightJava(string) {
-    range = 24;
-    globalBoxes = iterateFunJava(range, string);
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFunJava(range,  string);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
-    }
-}
-fun highlightJavaPredicate(predicate) {
-    range = 24;
-    globalBoxes = iterateFunJavaPredicate(range, predicate);
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFunJavaPredicate(range,  predicate);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
-    }
 }
 fun highlightJavaPredicateColor(predicate, mapping) {
     globalBoxes = iterateFunJavaPredicateColored(predicate, mapping);
@@ -256,45 +108,8 @@ fun highlightJavaPredicateColor(predicate, mapping) {
             boxes.render();
         }
         globalBoxesNext = iterateFunJavaPredicateColored(predicate, mapping);
-        player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms");
+        player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms with Thread count " + (xThreads * yThreads * zThreads));
         st = getMilliTime();
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
-    }
-}
-fun highlightJavaPredicateColorBlock(blockPredicate, mapping) {
-    globalBoxes = iterateFunJavaPredicateColoredBlock(blockPredicate, mapping);
-    //benchmark
-    st = getMilliTime();
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFunJavaPredicateColoredBlock(blockPredicate, mapping);
-        player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms");
-        st = getMilliTime();
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
-    }
-}
-fun highlight(string) {
-    range = 32;
-    globalBoxes = iterateFun(range,renderBoxIf, string);
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFun(range, renderBoxIf,  string);
         foreach (boxes : globalBoxesNext){
             boxes.render();
         }
@@ -316,28 +131,8 @@ fun predicateMap(position, mappings) {
     // if (mapping.contains(id)){
     //    return mapping.get(id);
     // }
-    return false;
+    return null;
 }
-fun predicateMapBlock(block, mappings) {
-    id = block.getId();
-    // Flexible containsString
-    foreach (values : mappings.getKeys()){
-        if (id.contains(values)){
-            return mappings.get(values);
-        }
-    }
-    // Fixed block search
-    // if (mapping.contains(id)){
-    //    return mapping.get(id);
-    // }
-    return false;
-}
-fun predicate(position){
-    id = world.getBlockAt(position).getId();
-    //return id.contains('spawner');
-    return id.contains('stone');
-}
-
 class VarRGB{
     var r;
     var g;
@@ -377,11 +172,25 @@ zdistanceTask = fun (newVal){
         zreach = newVal;
     }
 };
+xThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        xThreads = newVal;
+    }
+};
+yThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        yThreads = newVal;
+    }
+};
+zThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        zThreads = newVal;
+    }
+};
 safetyCountTask = fun (newVal){
     safetyLimit = newVal;
     player.message("Safety count is now set to " + safetyLimit);
 };
-fixedColorMapping = {};
 addSearchTask = fun (newVal,colour){
     mapping.put(newVal, colour);
     player.message("Toggled " +newVal + " search");
@@ -395,9 +204,10 @@ removeSearchTask = fun (val){
         mapping.remove(val);
         player.message("Removed " +val + " search");
     }
-
 };
+
 mapping = {
+    //'warped' : [0, 216, 255],
     //'diamond' : [0, 216, 255],
     //'redstone' : [255,0,0],
     //'gold' : [255,224,0],
@@ -405,10 +215,18 @@ mapping = {
     // 'ancient' : [255,124,0],
     // 'bee_nest' : [255,224,0]
 };
-new LinearCommand([['highlight'], ['remove'], ['string', 'Word']], removeSearchTask).process();
+suggesterRemove = fun (args...){
+    return mapping.getKeys();
+};
+//mapCommand = new LinearCommand([['highlight'], ['remove'], ['string', 'Word', suggesterRemove]], removeSearchTask).getMap();
+//print(MapPrinter.showMap(mapCommand));
+new LinearCommand([['highlight'], ['remove'], ['string', 'Word', suggesterRemove]], removeSearchTask).process();
 new LinearCommand([['highlight'], ['add'], ['string', 'Word'], ['color', 'Enum', RGB.type]], addSearchTask).process();
 new LinearCommand([['highlight'], ['add'], ['string', 'Word'], ['R', 'Integer', 0, 255], ['G', 'Integer', 0, 255], ['B', 'Integer', 0, 255]], addSearchRGBTask).process();
 new LinearCommand([['highlight'], ['setXDistance'], ['distance', 'Integer',1,255]], xdistanceTask).process();
+new LinearCommand([['highlight'], ['xThreads'], ['distance', 'Integer',1,4]], xThreadChangeTask).process();
+new LinearCommand([['highlight'], ['yThreads'], ['distance', 'Integer',1,4]], yThreadChangeTask).process();
+new LinearCommand([['highlight'], ['zThreads'], ['distance', 'Integer',1,4]], zThreadChangeTask).process();
 new LinearCommand([['highlight'], ['setYDistance'], ['distance', 'Integer',1,255]], ydistanceTask).process();
 new LinearCommand([['highlight'], ['setZDistance'], ['distance', 'Integer',1,255]], zdistanceTask).process();
 //highlightJavaPredicate(predicate);

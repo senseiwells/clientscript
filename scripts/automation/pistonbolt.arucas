@@ -70,7 +70,7 @@ fun assertInHotbar(items){
     foreach( itemString : itemSet.getKeys()){
         retval = swapHotbarSlotWithItem(availableSet.poll(), itemString);
         if (retval == null){
-            throwRuntimeError("Cannot swap item " + itemString + ' with slot number '+ availableSet.poll());
+            throw new Error("Cannot swap item " + itemString + ' with slot number '+ availableSet.poll());
         }
         availableSet.remove(retval);
     }
@@ -976,7 +976,7 @@ class Task {
             }
             else {
                 if (this.itemString == null){
-                    throwRuntimeError('itemString was null' + this.pos.formatted());
+                    throw new Error('itemString was null' + this.pos.formatted());
                 }
             }
             result = placeDirectionBlock(this.pos.asPos(),this.itemString,this.facing, this.isImmediate());
@@ -1850,7 +1850,7 @@ class BedrockBreakingTaskSeparator {
         this.iterators = fromList.copy();
     }
     fun addAll(startPos, endPos){
-        foreach (positions : world.getArea(startPos, endPos)){
+        foreach (positions : world.getPositions(startPos, endPos)){
              if(this.checkValidPos(positions)){
                 this.iterators.append(new PosWithFun(positions));
              }
@@ -2149,12 +2149,12 @@ taskFunctionHolder = Set.of();
 fillTask = fun ( x, y, z, ex, ey, ez, itemName) {
     taskIterator = new TaskIterator();
     if (itemName == 'air'){
-        foreach (position : world.getArea(new Pos(x,y,z), new Pos(ex,ey,ez))){
+        foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
             taskIterator.addAction(position, 'Air', Direction.NONE, true);
         }
     }
     else {
-        foreach (position : world.getArea(new Pos(x,y,z), new Pos(ex,ey,ez))){
+        foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
             taskIterator.addAction(position, itemName, Direction.NONE, false);
         }
     }
@@ -2163,7 +2163,7 @@ fillTask = fun ( x, y, z, ex, ey, ez, itemName) {
 };
 breakTask = fun ( x, y, z, ex, ey, ez) {
     taskIterator = new TaskIterator();
-    foreach (position : world.getArea(new Pos(x,y,z), new Pos(ex,ey,ez))){
+    foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
         taskIterator.addAction(position, 'Air', Direction.NONE, true);
     }
     taskHolder.add(taskIterator);
@@ -2180,7 +2180,8 @@ setAreaPos1Task = fun (x,y,z){
     messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
 };
 setAreaPos1RayTraceTask = fun (){
-    AreaPos1 = player.getLookingAtBlock().getPos();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    AreaPos1 = localplayer.getLookingAtBlock().getPos();
     messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
 };
 setAreaPos2Task = fun (x,y,z){
@@ -2194,7 +2195,8 @@ setAreaPos2Task = fun (x,y,z){
     }
 };
 setAreaPos2RayTraceTask = fun (){
-    AreaPos2 = player.getLookingAtBlock().getPos();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    AreaPos2 = localplayer.getLookingAtBlock().getPos();
     messageHolder.sendMessage('located bedrock breaking start pos 2 to '+ AreaPos2);
     if (AreaPos1 != null){
         delayedHolder.addAll(AreaPos1, AreaPos2);
@@ -2209,7 +2211,7 @@ fillDirectionTask = fun ( x, y, z, ex, ey, ez, itemName, direction) {
     if (!direction.isValid()){
         return null;
     }
-    foreach (position : world.getArea(new Pos(x,y,z), new Pos(ex,ey,ez))){
+    foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
         taskIterator.addAction(position, itemName, direction, false);
     }
     taskHolder.add(taskIterator);
@@ -2302,7 +2304,8 @@ breakingTask = fun (px, py, pz, headless){
 };
 
 breakingLookingAtTask = fun (){
-    pos = player.getLookingAtBlock();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    pos = localplayer.getLookingAtBlock();
     recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(pos));
     if (recordPiston == null){
         messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
@@ -2313,12 +2316,13 @@ breakingLookingAtTask = fun (){
     }
 };
 breakingLookingAtHeadlessTask = fun (direction, headless){
+    localplayer = MinecraftClient.getClient().getPlayer();
     direction = Direction.fromString(direction);
     if (!direction.isValid()) {
         messageHolder.sendMessageUnchecked("Direction name was not valid");
         return;
     }
-    pos = player.getLookingAtBlock();
+    pos = localplayer.getLookingAtBlock();
     recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(pos), direction);
     if (recordPiston == null){
         messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
@@ -2359,9 +2363,10 @@ diagonalUpTask = fun (px, py, pz, direction, itemString){
 
 //generate Scope with predicate, function for nearby blockPos
 PositionPredicateFunctionTask = fun (predicate, actionFunction, item) {return fun (){
-    centerPos = new PosWithFun(player.getPos());
-    range = world.getArea(centerPos.add(new PosWithFun(playerReach, playerReach, playerReach)).asPos(), centerPos.subtract(new PosWithFun(playerReach, playerReach, playerReach)).asPos());
-    foreach (pos : range){
+    localplayer = MinecraftClient.getClient().getPlayer();
+    centerPos = new PosWithFun(localplayer.getPos());
+    ranged = world.getPositions(centerPos.add(new PosWithFun(playerReach, playerReach, playerReach)).asPos(), centerPos.subtract(new PosWithFun(playerReach, playerReach, playerReach)).asPos());
+    foreach (pos : ranged){
         if (predicate(pos)){
             actionFunction(pos, item);
             return true;
@@ -2415,25 +2420,28 @@ fun actionPlacePowerNearby(pos, railPowerItem){
 //suggesters
 
 fun rayTraceX(args...){
-    block = player.getLookingAtBlock();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    block = localplayer.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(player.getPos().getX())];
+        return [Math.round(localplayer.getPos().getX())];
     }
-    return [player.getLookingAtBlock().getX()];
+    return [localplayer.getLookingAtBlock().getX()];
 }
 fun rayTraceY(args...){
-    block = player.getLookingAtBlock();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    block = localplayer.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(player.getPos().getY())];
+        return [Math.round(localplayer.getPos().getY())];
     }
-    return [player.getLookingAtBlock().getY()];
+    return [localplayer.getLookingAtBlock().getY()];
 }
 fun rayTraceZ(args...){
-    block = player.getLookingAtBlock();
+    localplayer = MinecraftClient.getClient().getPlayer();
+    block = localplayer.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(player.getPos().getZ())];
+        return [Math.round(localplayer.getPos().getZ())];
     }
-    return [player.getLookingAtBlock().getZ()];
+    return [localplayer.getLookingAtBlock().getZ()];
 }
 toggleRailPoweringTask = fun (newBool){
     railPoweringTaskOff = !newBool;
