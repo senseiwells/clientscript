@@ -7,7 +7,7 @@ import * from minecraft.PosUtils;
 client = MinecraftClient.getClient();
 player = client.getPlayer();
 world = client.getWorld();
-reach = 32;
+maxDistance = 32;
 xreach = 32;
 yreach = 32;
 zreach = 32;
@@ -20,12 +20,48 @@ BlockPosIterate = Java.getStaticMethodDelegate("net.minecraft.util.math.BlockPos
 CollectorList = Java.getStaticMethodDelegate('java.util.stream.Collectors', "toList", 0);
 BooleanValueOf = Java.getStaticMethodDelegate('java.lang.Boolean', 'valueOf', 1);
 globalBoxes = {};
-fun iterateFun(xreach,yreach, zreach, function, arguments, apply){
+Refresh = false;
+renderOnce = false;
+setCenter = false;
+maxAround = 0;
+center = player.getPos();
+
+//Iterates Area around player as xreach yreach zreach, checks functions, with additional argument(1), then maps value with apply, then collects
+fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
     retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    areas = new DivideArea(new PosWithFun(sx-xreach, sy-yreach, sz-zreach), new PosWithFun(sx+xreach, sy+yreach, sz+zreach)).divideBy(xThreads,yThreads,zThreads);
+    centerAs = player.getPos();
+    if(maxAround == 0){
+        centerAs = center;
+    }
+    else {
+        centerAs = player.getPos();
+    }
+    javaCenter = Java.valueOf(center);
+    maxDistancePredicate = fun (blockPos){
+        if(maxDistance == 0 || !setCenter){
+            return true;
+        }
+        return javaCenter.squaredDistanceTo(blockPos).toArucas() <  maxDistance^2;
+    };
+    playerCenter = Java.valueOf(player.getPos());
+    maxAroundPredicate = fun (blockPos){
+        if(maxAround == 0){
+            return true;
+        }
+        return playerCenter.squaredDistanceTo(blockPos).toArucas() <  maxAround^2;
+    };
+    sx = centerAs.getX().round();
+    xr = xreach;
+    yr = yreach;
+    zr = zreach;
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
+    if (maxAround != 0){
+        xr = Math.min(xreach, maxAround);
+        yr = Math.min(yreach, maxAround);
+        zr = Math.min(zreach, maxAround);
+    }
+    areas = new DivideArea(new PosWithFun(sx-xr, sy-yr, sz-zr), new PosWithFun(sx+xr, sy+yr, sz+zr)).divideBy(xThreads,yThreads,zThreads);
     lazyValues = [];
     i = 0;
     foreach (Area : areas){
@@ -35,6 +71,8 @@ fun iterateFun(xreach,yreach, zreach, function, arguments, apply){
             //print("started Thread " + _i + " Area size : "+Area.getSize() + " at "+ getMilliTime());
             streamInit = BlockPosIterate(Area.pos1.asJavaPos(), Area.pos2.asJavaPos()).spliterator();
             result =  StreamSupportStream(streamInit, Java.valueOf(false)).
+                filter(Java.predicateOf(maxDistancePredicate)).
+                filter(Java.predicateOf(maxAroundPredicate)).
                 filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
                 map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
                 filter(Java.predicateOf(fun(a){return a != false && a != null;})).
@@ -80,6 +118,14 @@ fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
     lazyValue = Thread.runAsync(lambda);
     return lazyValue;
 }
+
+compareStrategy = 'compare';
+compareOptions = {
+    'compare' : fun (a,b) {return a.contains(b);},
+    'exact' : fun (a,b) {return a == b;}
+};
+strategy = 'Async';
+options = {'Async' : iterateFunAsync, 'Lazy' : iterateFunLazy, 'Direct' : iterateFunDirect};
 fun renderBoxWhateverColorFromMap(position, color){
     box = new BoxShape(position);
     box.setColour(color.hexcode);
@@ -91,11 +137,12 @@ fun renderBoxWhateverColorFromMap(position, color){
 }
 fun iterateFunJavaPredicateColored(coloredfunction, mapping){
     retVal = [];
+    func = options.get(strategy);
     //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
     //tt = getMilliTime();
     //area = world.getArea(new Pos(sx-xreach, sy-yreach, sz-zreach), new Pos(sx+xreach, sy+yreach, sz+zreach));
     //player.messageActionBar("preparing " + ((2* reach+1)^3) + " blocks list took" + (getMilliTime() - tt)+ "ms");
-    return iterateFun(xreach,yreach, zreach, coloredfunction, mapping, renderBoxWhateverColorFromMap);
+    return func(xreach,yreach, zreach, coloredfunction, mapping, renderBoxWhateverColorFromMap);
 }
 fun getDistanceTo(pos){
     return ((player.getX() - pos.getX()) ^2 + (player.getY() - pos.getY()) ^2+(player.getZ() - pos.getZ()) ^2)^0.5;
@@ -107,11 +154,22 @@ fun highlightJavaPredicateColor(predicate, mapping) {
         foreach (boxes : globalBoxes){
             boxes.render();
         }
+        if (renderOnce){
+            Refresh = false;
+            renderOnce = false;
+            player.messageActionBar("Scheduled Rendering, will sleep, wait....");
+        }
         globalBoxesNext = iterateFunJavaPredicateColored(predicate, mapping);
         player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms with Thread count " + (xThreads * yThreads * zThreads));
         st = getMilliTime();
         foreach (boxes : globalBoxesNext){
             boxes.render();
+        }
+        while (!Refresh){
+            sleep(50);
+            if (renderOnce){
+                Refresh = true;
+            }
         }
         foreach (boxes : globalBoxes){
             boxes.stopRendering();
@@ -119,11 +177,20 @@ fun highlightJavaPredicateColor(predicate, mapping) {
         globalBoxes = globalBoxesNext;
     }
 }
+
 fun predicateMap(position, mappings) {
     id = world.getBlockAt(position).getId();
     // Flexible containsString
     foreach (values : mappings.getKeys()){
-        if (id.contains(values)){
+        if(Type.of(values).getName() != 'String'){
+            if(Type.of(values).getName() == 'Function'){
+                if (values(position)){
+                    return mappings.get(values);
+                }
+            }
+            continue;
+        }
+        if ((compareOptions.get(compareStrategy))(id, values)){
             return mappings.get(values);
         }
     }
@@ -132,6 +199,33 @@ fun predicateMap(position, mappings) {
     //    return mapping.get(id);
     // }
     return null;
+}
+fun generatePredicateLightLevelAndSolidAtPos(lightlevel){
+   ret = fun (position){
+        bool1 = world.getBlockAt(position).isReplaceable() && world.getBlockAt(position.add(0,1,0)).isReplaceable() && world.getLight(position) < lightlevel;
+        if(!bool1){
+            return false;
+        }
+         offsetBlock = world.getBlockAt(position.add(0,-1,0));
+         if (spawnableBlockMapping.get(offsetBlock.getId()) != null){
+            return true;
+         }
+         return null;
+   };
+   return ret;
+}
+
+fun predicateBlockProperty (id, prop, value){
+    return fun (position){
+        block = world.getBlockAt(position);
+        if (id == block.getId()){
+            properties = block.getBlockProperties();
+            if (properties.get(prop) == value){
+                return true;
+            }
+        }
+        return false;
+    };
 }
 class VarRGB{
     var r;
@@ -145,6 +239,20 @@ class VarRGB{
     }
 }
 //tasks
+setCenterTask = fun (x,y,z){
+    setCenter = true;
+    center = new Pos(x,y,z);
+    player.message("Center position is fixed to "+ center);
+};
+setCenterFollowTask = fun (){
+    setCenter = true;
+    center = player.getPos();
+    player.message("Center position is fixed to "+ center);
+};
+centerOffTask = fun (){
+    setCenter = false;
+    player.message("Center is automatically set to player");
+};
 xdistanceTask = fun (newVal){
     if((2* newVal+1) *(2* yreach+1) *(2* zreach+1) > safetyLimit){
         player.message("Block Area count of " +((2* xreach+1) *(2* yreach+1) *(2* zreach+1)) + " will exceed safety count " + safetyLimit);
@@ -172,6 +280,12 @@ zdistanceTask = fun (newVal){
         zreach = newVal;
     }
 };
+setMaxAroundPlayerTask = fun (newVal){
+    if (newVal >= 0){
+        maxAround = newVal;
+        player.message("Will only render blocks around player within : "+ newVal + "(0 allows infinite)");
+    }
+};
 xThreadChangeTask = fun (newVal){
     if(newVal > 0){
         xThreads = newVal;
@@ -193,10 +307,17 @@ safetyCountTask = fun (newVal){
 };
 addSearchTask = fun (newVal,colour){
     mapping.put(newVal, colour);
+    Refresh = true;
     player.message("Toggled " +newVal + " search");
+};
+addSearchAdvanceTask = fun (newVal, propertyName, propertyValue, colour) {
+    mapping.put(predicateBlockProperty(newVal, propertyName, PropertySuggester.parseValue(propertyValue)), colour);
+    Refresh = true;
+    player.message("Toggled " + newVal + "[" + propertyName +':'+ propertyValue + "] search");
 };
 addSearchRGBTask = fun (newVal,r,g,b){
     mapping.put(newVal, new VarRGB(r,g,b));
+    Refresh = true;
     player.message("Toggled " +newVal + " search");
 };
 removeSearchTask = fun (val){
@@ -205,7 +326,15 @@ removeSearchTask = fun (val){
         player.message("Removed " +val + " search");
     }
 };
-
+renderOnceTask = fun (){
+    if(renderOnce){
+        player.message("Already handling render!");
+        return;
+    }
+    renderOnce = true;
+    Refresh = true;
+    player.message("Will render once");
+};
 mapping = {
     //'warped' : [0, 216, 255],
     //'diamond' : [0, 216, 255],
@@ -215,14 +344,84 @@ mapping = {
     // 'ancient' : [255,124,0],
     // 'bee_nest' : [255,224,0]
 };
+functionMapping = {
+
+
+
+};
+
+spawnableBlockMapping = {
+
+};
+
+setStrategyTask = fun (newStrategy){
+    if (options.get(newStrategy) != null){
+        strategy = newStrategy;
+        player.message("New strategy : " + strategy);
+    }
+};
+setCompareStrategyTask = fun (newStrategy){
+    if (compareOptions.get(newStrategy) != null){
+        compareStrategy = newStrategy;
+        player.message("New compare strategy : " + compareStrategy);
+    }
+};
+setMaxDistanceTask = fun (newDistance){
+    maxDistance = newDistance;
+    xreach = maxDistance;
+    yreach = maxDistance;
+    zreach = maxDistance;
+    player.message("Max distance is set to : "+ maxDistance);
+};
+addSpwanableBlockTask = fun (blockName){
+    spawnableBlockMapping.put(blockName, true);
+    player.message("Added spawnable block : "+ blockName);
+};
+removeSpwanableBlockTask = fun (blockName){
+    spawnableBlockMapping.remove(blockName);
+    player.message("Removed spawnable block : "+ blockName);
+};
+addLightLevelTask = fun (lightlevel, color){
+    player.message("Now refreshing is set to : "+ Refresh + ", if you need to toggle, run /highlight toggleRefresh");
+    functionMapping.put(lightlevel , generatePredicateLightLevelAndSolidAtPos(lightlevel));
+    mapping .put( functionMapping.get(lightlevel), color );
+    player.message("Added lightlevel spawn search task  : "+ lightlevel);
+};
+
+removeLightLevelTask = fun (lightlevel){
+    if (functionMapping.get(lightlevel) == null){
+        return;
+    }
+    mapping .remove(functionMapping.get(lightlevel));
+    player.message("Removed lightlevel spawn search task  : "+ lightlevel);
+};
 suggesterRemove = fun (args...){
     return mapping.getKeys();
 };
-//mapCommand = new LinearCommand([['highlight'], ['remove'], ['string', 'Word', suggesterRemove]], removeSearchTask).getMap();
-//print(MapPrinter.showMap(mapCommand));
+suggesterRemoveBlock = fun (args...){
+    return spawnableBlockMapping.getKeys();
+};
+setStopRefresh = fun (){
+    Refresh =! Refresh;
+    player.message("Now render refresh is set to : "+ (Refresh));
+};
+new LinearCommand([['highlight'], ['compareOptions'], ['strategy', 'Word', compareOptions.getKeys()]], setStrategyTask).process();
+new LinearCommand([['highlight'], ['setStrategy'], ['strategy', 'Word', options.getKeys()]], setStrategyTask).process();
+new LinearCommand([['highlight'], ['renderOnce']], renderOnceTask).process();
+new LinearCommand([['highlight'], ['toggleRefresh']], setStopRefresh).process();
+new LinearCommand([['highlight'], ['setMaxDistance'], ['distance', 'Integer', 0, 128]], setMaxDistanceTask).process();
+new LinearCommand([['highlight'], ['setPlayerAroundDistance'], ['distance', 'Integer', 0, 128]], setMaxAroundPlayerTask).process();
+new LinearCommand([['highlight'], ['setFixedCenter'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer']], setCenterTask).process();
+new LinearCommand([['highlight'], ['setFixedCenter']], setCenterFollowTask).process();
+new LinearCommand([['highlight'], ['disableFixedCenter']], centerOffTask).process();
+new LinearCommand([['highlight'], ['addSpawnableBlock'], ['string', 'Word', DefaultSuggester.BLOCKS]], addSpwanableBlockTask).process();
+new LinearCommand([['highlight'], ['removeSpawnableBlock'], ['string', 'Word', suggesterRemoveBlock]], removeSpwanableBlockTask).process();
 new LinearCommand([['highlight'], ['remove'], ['string', 'Word', suggesterRemove]], removeSearchTask).process();
-new LinearCommand([['highlight'], ['add'], ['string', 'Word'], ['color', 'Enum', RGB.type]], addSearchTask).process();
-new LinearCommand([['highlight'], ['add'], ['string', 'Word'], ['R', 'Integer', 0, 255], ['G', 'Integer', 0, 255], ['B', 'Integer', 0, 255]], addSearchRGBTask).process();
+new LinearCommand([['highlight'], ['lightLevel'], ['remove'],['level', 'Integer', 0, 15]], removeLightLevelTask).process();
+new LinearCommand([['highlight'], ['lightLevel'], ['add'], ['level', 'Integer', 0, 15], ['color', 'Enum', RGB.type]], addLightLevelTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['property'], ['propertyName', 'Word', PropertySuggester.getProperties], ['propertyValue', 'Word', PropertySuggester.getPropertyValues], ['color', 'Enum', RGB.type]], addSearchAdvanceTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['color', 'Enum', RGB.type]], addSearchTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['R', 'Integer', 0, 255], ['G', 'Integer', 0, 255], ['B', 'Integer', 0, 255]], addSearchRGBTask).process();
 new LinearCommand([['highlight'], ['setXDistance'], ['distance', 'Integer',1,255]], xdistanceTask).process();
 new LinearCommand([['highlight'], ['xThreads'], ['distance', 'Integer',1,4]], xThreadChangeTask).process();
 new LinearCommand([['highlight'], ['yThreads'], ['distance', 'Integer',1,4]], yThreadChangeTask).process();

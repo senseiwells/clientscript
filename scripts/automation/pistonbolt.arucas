@@ -1,6 +1,7 @@
 import * from Minecraft;
 import Java from util.Internal;
 import LinearCommand from minecraft.CommandUtils;
+import DefaultSuggester from minecraft.CommandUtils;
 import * from minecraft.PosUtils;
 import * from minecraft.MinecraftUtils;
 
@@ -40,7 +41,7 @@ railPowerItem = 'netherrack';
 spawnProofItem = 'glass';
 spawnProofTaskOn = false;
 sleepInterval = 0;
-hideMessage = false;
+hideMessage = true;
 singleUsePosSet = Set.of();
 
 AreaPos1 = null;
@@ -744,6 +745,7 @@ class MessageHolder{
     var stringSet;
     var debugFlag;
     var previousMessage ;
+    var actionbar = false;
     MessageHolder(){
         this.stringSet = Set.of();
     }
@@ -751,7 +753,12 @@ class MessageHolder{
         if(this.previousMessage == message){
             return;
         }
-        player.message(message);
+        if (this.actionbar){
+            player.messageActionBar(message);
+        }
+        else {
+            player.message(message);
+        }
         this.stringSet.add(message);
         this.previousMessage = message;
     }
@@ -765,7 +772,12 @@ class MessageHolder{
         this.stringSet.add(message);
     }
     fun sendMessageUnchecked(message){
-        player.message(message);
+        if (this.actionbar){
+            player.messageActionBar(message);
+        }
+        else {
+            player.message(message);
+        }
         this.stringSet.add(message);
     }
     fun sendDebugMessage(message){
@@ -956,6 +968,18 @@ class Task {
     fun isAvailable(){
         return (this.ignoreDistance || this.pos.isNear(player, playerReach) ) && this.checkInventory() && (this.shouldBreak || requiredOffsetCheck(this.pos, this.itemString, this.facing)) ;
     }
+    fun findReason(){
+        if (!this.pos.isNear(player, playerReach)){
+            return "Position is not near to player pos " + player.getPos() +" " + this.pos.formatted();
+        }
+        if (!this.checkInventory()){
+            return "Does not have item";
+        }
+        if (!requiredOffsetCheck(this.pos, this.itemString, this.facing)){
+            return "can't place block at pos "+ this.pos;
+        }
+        return "available";
+    }
     fun process(){
     // checks, returns if processed
         if (this.internalCanProcess()){
@@ -988,13 +1012,23 @@ class Task {
             else {
                 messageHolder.sendMessage(this.formattedError());
             }
-
+        }
+        else {
+            messageHolder.sendMessage(this.formattedError() + "Reason : not available");
         }
         return false;
     }
     fun execute(){
     //direct excution.
         return this.finish();
+    }
+    fun executeOrElse(){
+        if (this.internalCanProcess()){
+            this.process();
+        }
+        else {
+            messageHolder.sendMessage(this.findReason());
+        }
     }
     fun finish(){
         while (true){
@@ -2119,6 +2153,17 @@ class SpawnConditionCheck{
         }
         return null;
     }
+    fun getNormalSpawnProof(pos){
+        pos = new PosWithFun(pos);
+        if (!this.world.getBlockAt(pos.up().asPos()).isReplaceable()){
+            return null;
+        }
+        blockId = this.world.getBlockAt(pos.down().asPos()).getId();
+        if ( blockId == 'netherrack' || blockId == 'soul_sand'|| blockId == 'soul_soil'|| blockId.contains('ore')){
+            return this.returnIfReplaceable(pos.asPos());
+        }
+        return null;
+    }
     fun returnIfReplaceable(pos){
         if (this.world.getBlockAt(pos).isReplaceable()){
             return pos;
@@ -2180,8 +2225,7 @@ setAreaPos1Task = fun (x,y,z){
     messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
 };
 setAreaPos1RayTraceTask = fun (){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    AreaPos1 = localplayer.getLookingAtBlock().getPos();
+    AreaPos1 = player.getLookingAtBlock().getPos();
     messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
 };
 setAreaPos2Task = fun (x,y,z){
@@ -2195,8 +2239,7 @@ setAreaPos2Task = fun (x,y,z){
     }
 };
 setAreaPos2RayTraceTask = fun (){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    AreaPos2 = localplayer.getLookingAtBlock().getPos();
+    AreaPos2 = player.getLookingAtBlock().getPos();
     messageHolder.sendMessage('located bedrock breaking start pos 2 to '+ AreaPos2);
     if (AreaPos1 != null){
         delayedHolder.addAll(AreaPos1, AreaPos2);
@@ -2223,18 +2266,18 @@ pauseTask = fun (){
 };
 intervalChangeTask = fun(newInterval){
     sleepInterval = newInterval;
-    messageHolder.sendMessageUnchecked('New interval : '+ newInteval + 'ms');
+    messageHolder.sendMessageUnchecked('New interval : '+ newInterval + 'ms');
 };
 blockIntervalChangeTask = fun (newInterval){
     if(newInterval > 0){
         taskInterval = newInterval;
-        messageHolder.sendMessageUnchecked('New interval between blocks: '+ newInteval + 'ms');
+        messageHolder.sendMessageUnchecked('New interval between blocks: '+ newInterval + 'ms');
     }
 };
 serverPingChangeTask = fun (newInterval){
     if(newInterval > 0){
         serverPing = newInterval;
-        messageHolder.sendMessageUnchecked('Server Ping Expected: '+ newInteval + 'ms');
+        messageHolder.sendMessageUnchecked('Server Ping Expected: '+ newInterval + 'ms');
     }
 };
 trustClientTask = fun (){
@@ -2304,8 +2347,7 @@ breakingTask = fun (px, py, pz, headless){
 };
 
 breakingLookingAtTask = fun (){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    pos = localplayer.getLookingAtBlock();
+    pos = player.getLookingAtBlock();
     recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(pos));
     if (recordPiston == null){
         messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
@@ -2316,13 +2358,12 @@ breakingLookingAtTask = fun (){
     }
 };
 breakingLookingAtHeadlessTask = fun (direction, headless){
-    localplayer = MinecraftClient.getClient().getPlayer();
     direction = Direction.fromString(direction);
     if (!direction.isValid()) {
         messageHolder.sendMessageUnchecked("Direction name was not valid");
         return;
     }
-    pos = localplayer.getLookingAtBlock();
+    pos = player.getLookingAtBlock();
     recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(pos), direction);
     if (recordPiston == null){
         messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
@@ -2354,22 +2395,38 @@ diagonalUpTask = fun (px, py, pz, direction, itemString){
         messageHolder.sendMessageUnchecked("Direction name was not valid");
         return;
     }
-    diagonalUpTask = new CyclicTaskGenerator(new PosWithFun(px,py,pz));
-    diagonalUpTask.addAction(new Task(new PosWithFun(0,0,0), itemString, null));
-    diagonalUpTask.blockSize = new PosWithFun(0,1,0).offset(direction);
-    taskHolder.add(diagonalUpTask);
+    diagonalUpTasks = new CyclicTaskGenerator(new PosWithFun(px,py,pz));
+    diagonalUpTasks.addAction(new Task(new PosWithFun(0,0,0), itemString, null));
+    diagonalUpTasks.blockSize = new PosWithFun(0,1,0).offset(direction);
+    taskHolder.add(diagonalUpTasks);
+};
+bridgeTask = fun (px, py, pz, direction, itemString){
+    direction = Direction.fromString(direction);
+    if(!direction.isValid()){
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+        return;
+    }
+    bridgeTasks = new CyclicTaskGenerator(new PosWithFun(px,py,pz));
+    bridgeTasks.addAction(new Task(new PosWithFun(0,0,0), itemString, null));
+    bridgeTasks.blockSize = new PosWithFun(0,0,0).offset(direction);
+    taskHolder.add(bridgeTasks);
 };
 
-
+toggleActionBarTask = fun (){
+    messageHolder.actionbar = !messageHolder.actionbar;
+};
 //generate Scope with predicate, function for nearby blockPos
-PositionPredicateFunctionTask = fun (predicate, actionFunction, item) {return fun (){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    centerPos = new PosWithFun(localplayer.getPos());
+PositionPredicateFunctionTask = fun (predicate, actionFunction, itemGetter) {return fun (){
+    item = itemGetter();
+    centerPos = new PosWithFun(player.getPos());
     ranged = world.getPositions(centerPos.add(new PosWithFun(playerReach, playerReach, playerReach)).asPos(), centerPos.subtract(new PosWithFun(playerReach, playerReach, playerReach)).asPos());
     foreach (pos : ranged){
         if (predicate(pos)){
-            actionFunction(pos, item);
-            return true;
+            messageHolder.sendDebugMessage("Action found for "+ pos);
+            if (actionFunction(pos, item)){
+                messageHolder.sendDebugMessage("Action found for "+ pos + " should sleep");
+                return true;
+            }
         }
     };
     return false;
@@ -2379,7 +2436,7 @@ fun predicateSpawnProof(pos){
     if (!spawnProofTaskOn){
         return false;
     }
-    boolean = !singleUsePosSet.contains(pos) && spawnChecker.isZombieLightIgnoredPos(pos);
+    boolean = !singleUsePosSet.contains(pos) && spawnChecker.getNormalSpawnProof(pos)!= null && new PosWithFun(pos).isNear(player, playerReach);
     if (boolean){
         singleUsePosSet.add(pos);
         return true;
@@ -2388,8 +2445,11 @@ fun predicateSpawnProof(pos){
 }
 
 fun actionPlaceSpawnproofNearby(pos, item){
-    messageHolder.sendDebugMessage(pos);
-    new Task(pos, item, null).execute();
+    //messageHolder.sendDebugMessage(pos);
+    task = new Task(pos, item, null);
+    task.ignoreDistance = true;
+    task.executeOrElse();
+    return false;
 }
 
 fun predicatePlacePower(pos){
@@ -2408,41 +2468,39 @@ fun actionPlacePowerNearby(pos, railPowerItem){
         newPos = new PosWithFun(pos).offset(directions);
         newPosBelow = newPos.down();
         if (world.getBlockAt(newPosBelow.asPos()).isReplaceable() && world.getBlockAt(newPos.asPos()).isReplaceable()){
-            messageHolder.sendDebugMessage(newPosBelow.formatted());
+            //messageHolder.sendDebugMessage(newPosBelow.formatted());
             new Task(newPosBelow, railPowerItem, null).execute();
             new Task(newPos, 'redstone_torch', Direction.DOWN).execute();
             sleep(300);
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 //suggesters
 
-fun rayTraceX(args...){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    block = localplayer.getLookingAtBlock();
+rayTraceX = fun (args...){
+    block = player.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(localplayer.getPos().getX())];
+        return [Math.round(player.getPos().getX())];
     }
-    return [localplayer.getLookingAtBlock().getX()];
-}
-fun rayTraceY(args...){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    block = localplayer.getLookingAtBlock();
+    return [player.getLookingAtBlock().getX()];
+};
+rayTraceY = fun (args...){
+    block = player.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(localplayer.getPos().getY())];
+        return [Math.round(player.getPos().getY())];
     }
-    return [localplayer.getLookingAtBlock().getY()];
-}
-fun rayTraceZ(args...){
-    localplayer = MinecraftClient.getClient().getPlayer();
-    block = localplayer.getLookingAtBlock();
+    return [player.getLookingAtBlock().getY()];
+};
+rayTraceZ = fun (args...){
+    block = player.getLookingAtBlock();
     if (block.getId().contains('air')){
-        return [Math.round(localplayer.getPos().getZ())];
+        return [Math.round(player.getPos().getZ())];
     }
-    return [localplayer.getLookingAtBlock().getZ()];
-}
+    return [player.getLookingAtBlock().getZ()];
+};
 toggleRailPoweringTask = fun (newBool){
     railPoweringTaskOff = !newBool;
     messageHolder.sendMessageUnchecked('Rail powering task is set to '+ (!railPoweringTaskOff));
@@ -2465,31 +2523,33 @@ setSpawnProofItemTask = fun (newItem){
     spawnProofItem = newItem;
     messageHolder.sendMessageUnchecked('Spawnproof item is set to ' + newItem);
 };
-func = PositionPredicateFunctionTask(predicatePlacePower, actionPlacePowerNearby, railPowerItem);
+func = PositionPredicateFunctionTask(predicatePlacePower, actionPlacePowerNearby, fun(){return railPowerItem;});
 taskFunctionHolder.add(func);
-func = PositionPredicateFunctionTask(predicateSpawnProof, actionPlaceSpawnproofNearby, spawnProofItem);
+func = PositionPredicateFunctionTask(predicateSpawnProof, actionPlaceSpawnproofNearby, fun(){return spawnProofItem;});
 taskFunctionHolder.add(func);
 //Register commands.
-new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word']], fillTask).process();
+new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS]], fillTask).process();
 new LinearCommand([['eBreak'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakTask).process();
-new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word'], ['direction', 'Word']], fillDirectionTask).process();
+new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS], ['direction', 'Word', DefaultSuggester.DIRECTIONS]], fillDirectionTask).process();
 new LinearCommand([['eCommand'],['pause']], pauseTask).process();
 new LinearCommand([['eCommand'],['toggleMessage']], toggleMessageTask).process();
+new LinearCommand([['eCommand'],['toggleActionBar']], toggleActionBarTask).process();
 new LinearCommand([['eRailPowering'],['bool', 'Boolean']], toggleRailPoweringTask).process();
-new LinearCommand([['eRailPowering'],['setItem'], ['newItem', 'Word']], setRailPowerItem).process();
+new LinearCommand([['eRailPowering'],['setItem'], ['newItem', 'Word', DefaultSuggester.BLOCKS]], setRailPowerItem).process();
 new LinearCommand([['eSpawnproof'],['bool', 'Boolean']], toggleSpawnProofTask).process();
-new LinearCommand([['eSpawnproof'],['setItem'], ['newItem', 'Word']], setSpawnProofItemTask).process(); //setPistonItemTask
+new LinearCommand([['eSpawnproof'],['setItem'], ['newItem', 'Word', DefaultSuggester.BLOCKS]], setSpawnProofItemTask).process(); //setPistonItemTask
 new LinearCommand([['eCommand'],['AccurateBlockPlacement'], ['bool', 'Boolean']], toggleProtocolTask).process();
 new LinearCommand([['eCommand'],['toggleTrustClient']], trustClientTask).process();
 new LinearCommand([['eCommand'], ['setInterval'], ['milliseconds', 'Integer']], intervalChangeTask).process();
 new LinearCommand([['eCommand'], ['setBlockPlacmentInterval'], ['milliseconds', 'Integer']], blockIntervalChangeTask).process();
 new LinearCommand([['eCommand'], ['expectedServerPing'], ['milliseconds', 'Integer']], serverPingChangeTask).process();
-new LinearCommand([['eDiagonalPlace'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']], ['itemString', 'Word']], diagonalUpTask).process();
+new LinearCommand([['eDiagonalPlace'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', DefaultSuggester.HORIZONTAL], ['itemString', 'Word', DefaultSuggester.BLOCKS]], diagonalUpTask).process();
+new LinearCommand([['eBridge'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word',  DefaultSuggester.DIRECTIONS], ['itemString', 'Word', DefaultSuggester.BLOCKS]], bridgeTask).process();
 new LinearCommand([['eDemiBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], demiBoltTask).process();
 new LinearCommand([['eStandardBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], standardBoltTask).process();
 new LinearCommand([['eDiagonalBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], diagonalBoltTask).process();
 new LinearCommand([['eCommand'], ['setReachDistance'], ['reachDistance', 'Double']], reachDistanceTask).process();
-new LinearCommand([['eBedrockBreaking'],  ['setItem'], ['itemName', 'Word']], setPistonItemTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setItem'], ['itemName', 'Word', ['piston', 'sticky_piston']]], setPistonItemTask).process();
 new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['headless', 'Boolean']], breakingTask).process();
 new LinearCommand([['eBedrockBreaking'],  ['setPos1'] ,['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ]], setAreaPos1Task).process();
 new LinearCommand([['eBedrockBreaking'],  ['setPos1'] ,['rayTrace']], setAreaPos1RayTraceTask).process();
@@ -2537,6 +2597,10 @@ i = 0;
 //taskHolder.add(taskIterator);
 while (true){
     if (pause){
+        sleep(50);
+        continue;
+    }
+    if (player.getGamemode() == 'spectator'){
         sleep(50);
         continue;
     }

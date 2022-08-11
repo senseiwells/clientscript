@@ -1,0 +1,467 @@
+import * from Minecraft;
+import * from minecraft.MinecraftUtils;
+import * from minecraft.CommandUtils;
+import * from util.FormatUtils;
+import * from util.Json;
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+
+
+papermode = false;
+sneakWhenBreak = false;
+fixTrade = true;
+
+// How to use it :
+// Turn on script then you can type /tradeSetup command.
+// tradeSetup command
+fun showSuccess() {
+    player.messageActionBar("A");
+    sleep(100000);
+}
+
+fun showMsg(msg, time) {
+    player.messageActionBar(msg);
+    sleep(time);
+}
+fun showhelp() {
+    player.message('/tradeSetup command pauses / resumes actions');
+    player.message('/tradeSetup <enchantment> <wantedlevel> <price> to add enchantment searches');
+    player.message('Pause and add enchantments you want then resume to search multiple');
+    player.message('/tradeSetup papermode to toggle paper-compatible setup');
+    player.message('/tradeSetup add fortune-1-31-looting-3-16');
+}
+fun getIterator(start, end, num){
+    ii = 0;
+    maxlen = 1000;
+    ret = [start];
+    c = start;
+    while (c < end && ii < maxlen){
+        c = c+num;
+        ret.append(c);
+        ii = ii+1;
+    }
+    return ret;
+}
+bx = 221;
+by = 49;
+bz = 138;
+localBox = null;
+reach = 1;
+found = false;
+fun getLookingDirection(entity){
+    // yaw 180 -180 - North east -90 south 0 west +90
+    yaw = entity.getYaw();
+    //135 - 180, -180 - -135 North
+    if (yaw >= 135 || yaw <= -135){
+        return 'north';
+    }
+    else if (-135 < yaw && yaw <= -45) {
+        return 'east';
+    }
+    else if (-45 <= yaw && yaw < 45) {
+        return 'south';
+    }
+    return 'west';
+}
+fun list_add(l1, l2){
+    i = 0;
+    newlist = [];
+    length = Math.min(len(l1), len(l2));
+    while (i < length){
+        newlist.append(l1.get(i) + l2.get(i));
+        i = i+1;
+    }
+    return newlist;
+}
+fun getOffset(pos, direction){
+    //north -z south +z east +x west -x
+    switch (direction){
+        case 'north'->
+            return list_add(pos , [0,0,-1]);
+        case 'south'->
+            return list_add(pos , [0,0,1]);
+        case 'east'->
+            return list_add(pos , [1,0,0]);
+        case 'west'->
+            return list_add(pos , [-1,0,0]);
+        default->
+            return pos;
+    }
+}
+refreshLecternTask = fun (){
+    sx =  Math.floor(player.getX());
+    sy =  Math.floor(player.getY());
+    sz =  Math.floor(player.getZ());
+    SxL = getIterator(sx-reach, sx+reach, 1);
+    SyL = getIterator(sy-reach, sy+reach, 1);
+    SzL = getIterator(sz-reach, sz+reach, 1);
+    //first prioritize looking direction
+    checkPos = getOffset(player.getPos().toList(), getLookingDirection(player));
+    if (world.getBlockAt(checkPos.get(0), checkPos.get(1), checkPos.get(2)).getId() == 'lectern'){
+        found = true;
+        bx = Math.floor(checkPos.get(0));
+        by = Math.floor(checkPos.get(1));
+        bz = Math.floor(checkPos.get(2));
+    }
+
+    foreach (Sx : SxL) {
+        foreach (Sy : SyL ) {
+            foreach (Sz : SzL) {
+                if (found){
+                    break;
+                }
+                if (world.getBlockAt(Sx,Sy,Sz).getId() == 'lectern'){
+                    bx = Sx;
+                    by = Sy;
+                    bz = Sz;
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+    if(!found) {
+        player.message("Cannot find lectern");
+    }
+    else {
+        if(localBox != null){
+            localBox.stopRendering();
+        }
+        player.message('Lectern at ' + bx + ' '+ by + ' ' + bz);
+        localBox = new BoxShape(bx,by,bz);
+        localBox.setColour(18540);
+        localBox.setOutlineColor(0,0,0);
+        localBox.setOpacity(20);
+        localBox.setOutlinePixelWidth(15);
+        localBox.setRenderThroughBlocks(true);
+        localBox.render();
+        sleep(125);
+    }
+};
+refreshLecternTask();
+
+refMap = {
+    "fortune" : {'lvl':3, 'price':14},
+    "mending" :{'lvl':1, 'price':12},
+    "unbreaking" : {'lvl':3, 'price':17},
+    "aqua_affinity" : {'lvl':1, 'price':7},
+    "blast_protection" : {'lvl':4, 'price':20},
+    "depth_strider" : {'lvl':3, 'price':12},
+    "feather_falling" : {'lvl':4, 'price':17},
+    "frost_walker" : {'lvl':1, 'price':20},
+    "protection" : {'lvl':4, 'price':20},
+    "respiration" : {'lvl':3, 'price':15},
+    "thorns" : {'lvl':3, 'price':15},
+    "efficiency" : {'lvl':5, 'price':26},
+    "sharpness" : {'lvl':5, 'price':20},
+    "smite" : {'lvl':5, 'price':25},
+    "sweeping_edge" : {'lvl':3, 'price':15},
+    "channeling" : {'lvl':1, 'price':20},
+    "flame" : {'lvl':1, 'price':10},
+    "looting" : {'lvl':3, 'price':12},
+    "infinity" : {'lvl':1, 'price':5},
+    "loyalty" : {'lvl':3, 'price':20},
+    "riptide" : {'lvl':3, 'price':20},
+    "multishot" : {'lvl':1, 'price':20},
+    "piercing" : {'lvl':4, 'price':25},
+    "power" : {'lvl':5, 'price':17},
+    "punch" : {'lvl':2, 'price':12},
+    "quick_charge" : {'lvl':3, 'price':17},
+    "luck_of_the_sea" : {'lvl':3, 'price':17},
+    "lure" : {'lvl':3, 'price':17},
+    "silk_touch" : {'lvl':1, 'price':5}
+};
+auto = null;
+mapFor = refMap;
+fun togglePaperMode(){
+    papermode = !papermode;
+    player.message('Papermode is set to ' + papermode);
+}
+fun swapToaxe() {
+    slot = player.getSlotFor(ItemStack.of(Material.of("netherite_axe")));
+    if (slot == null) {
+        slot = player.getSlotFor(ItemStack.of(Material.of("diamond_axe")));
+    }
+    if (slot == null) {
+        slot = player.getSlotFor(ItemStack.of(Material.of("iron_axe")));
+    }
+    foreach (i : [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]){
+        if (player.getItemForPlayerSlot(i).getId().contains("_axe")){
+            player.setSelectedSlot(i);
+            return true;
+        }
+    }
+    if (slot != null) {
+        if (0 <= slot - 36 && slot - 36 <= 8) {
+            player.setSelectedSlot(slot - 36);
+            return true;
+        } else {
+            preslot = player.getSwappableHotbarSlot();
+            player.swapPlayerSlotWithHotbar(slot);
+            player.setSelectedSlot(preslot);
+            return true;
+        }
+    }
+    throwRuntimeError("No pickaxe item was found");
+}
+
+fun swapToItem(itemString) {
+    if (itemString == "air") {
+        return false;
+    }
+    foreach (i : [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]){
+        if (player.getItemForPlayerSlot(i).getId() == itemString || player.getItemForPlayerSlot(i).getId().contains(itemString) ){
+            player.setSelectedSlot(i);
+            return false;
+        }
+    }
+    slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
+    retVal = false;
+    if (slot == null) {
+        throwRuntimeError("No " + itemString + " was found");
+    }
+    if (player.getItemForSlot(slot).getCount() >= 1) {
+        retVal = true;
+    }
+    if (slot != null) {
+        if (0 <= slot - 36 && slot - 36 <= 8) {
+            player.setSelectedSlot(slot - 36);
+            return retVal;
+        } else {
+            preslot = player.getSwappableHotbarSlot();
+            player.swapPlayerSlotWithHotbar(slot);
+            player.setSelectedSlot(preslot);
+            return retVal ;
+        }
+    }
+
+}
+fun getRandomOffset(){
+    randrange = 10;
+    center = 0.4;
+    return (random(randrange * 2) - randrange) / randrange * 0.8 + 0.1 - 0.5;
+}
+fun placeBlock(){
+    while (true) {
+        if (world.getBlockAt(bx,by,bz).getId()=='lectern'){
+            return true;
+        }
+        swapToItem('lectern');
+        //player.lookAtPos(bx, by, bz);
+        player.interactBlock(bx + 0.5 + getRandomOffset(),by, bz+0.5 + getRandomOffset(),"up",bx,by-1,bz, false);
+        sleep(100);
+    }
+}
+isPaused = true;
+fun togglePause(){
+    isPaused = !isPaused;
+    if(isPaused){
+        player.message('Search is now paused');
+    }
+    else{
+        player.message('Search is now active');
+    }
+
+}
+enchantlists = {};
+
+fun addToEnchantsParsed(enchantsPreSeparate){
+    sep = '-';
+    split = enchantsPreSeparate.split('-');
+    if(Math.mod(len(split),3) == 0){
+        for(ii = 0; ii< len(split)/3;ii++){
+            enchantName = split.get(3*ii);
+            lvl = split.get(3*ii+1).toNumber();
+            price = split.get(3*ii+2).toNumber();
+            player.message('Search list added: '+ enchantName + ' '+ lvl + ' ' +price);
+            enchantlists.put(enchantName, {'lvl': lvl, 'price': price});
+        }
+    }
+    else {
+        player.message('Given enchantments is not multiplier of 3');
+        player.message('ex) /tradeSetup add fortune-1-13-protection-2-24');
+    }
+}
+trial = 0;
+isWanted = false;
+isExecuting = false;
+
+saveListTask = fun (args...){
+   file = new File(File.getDirectory().getAbsolutePath() + '/enchantList.json');
+   Json.fromMap(enchantlists).writeToFile(file);
+   player.message('File written to '+ file.getAbsolutePath());
+};
+
+loadListTask = fun (args...){
+   file = new File(File.getDirectory().getAbsolutePath() + '/enchantList.json');
+   enchantlists = Json.fromString(file.read()).getValue();
+   player.message('File loaded from '+ file.getAbsolutePath());
+};
+loadListAndRunTask = fun (args...){
+   file = new File(File.getDirectory().getAbsolutePath() + '/enchantList.json');
+   enchantlists = Json.fromString(file.read()).getValue();
+   player.message('File loaded from '+ file.getAbsolutePath());
+   isPaused = false;
+};
+removeAndSaveRunTask = fun (enchantment){
+    refreshLecternTask();
+    player.message('Refreshed lectern');
+    player.message('Removed searching : '+ enchantment);
+    enchantlists.remove(enchantment);
+    file = new File(File.getDirectory().getAbsolutePath() + '/enchantList.json');
+    Json.fromMap(enchantlists).writeToFile(file);
+    player.message('File written to '+ file.getAbsolutePath());
+    isPaused = false;
+};
+removeAndSaveRunTaskAuto = fun (){
+    refreshLecternTask();
+    player.message('Refreshed lectern');
+    player.message('Removed searching : '+ auto);
+    if (auto != null)
+        enchantlists.remove(auto);
+    auto = null;
+    file = new File(File.getDirectory().getAbsolutePath() + '/enchantList.json');
+    Json.fromMap(enchantlists).writeToFile(file);
+    player.message('File written to '+ file.getAbsolutePath());
+    isPaused = false;
+};
+printCurrentEnchantTask = fun (args...){
+    player.message(FormatUtil.showMap(enchantlists));
+};
+addTradeSetupTask = fun (enchantmentId, lvl, price) {
+    enchantment = enchantmentId.split(':').get(1);
+    player.message('Search list added: '+ enchantment + ' '+ lvl + ' ' +price);
+    enchantlists.put(enchantment, {'lvl': lvl, 'price': price});
+};
+removeTradeSetupTask = fun (enchantment) {
+    player.message('Removed searching : '+ enchantment);
+    enchantlists.remove(enchantment);
+};
+suggestExistingSetup = fun (args...){
+    return enchantlists.getKeys();
+};
+loadDefaultTask = fun (args...){
+    enchantlists = refMap;
+    player.message('Loaded default setup!');
+};
+
+allowFixingTradeTask = fun (bool){
+    player.message("Fixing trade after done is set to : "+ bool);
+    fixTrade = bool;
+};
+new LinearCommand([['tradeSetup']], fun() {isPaused = true;}).process();
+new LinearCommand([['tradeSetup'], ['fixTrade'], ['boolean', "Boolean"]], allowFixingTradeTask).process();
+new LinearCommand([['tradeSetup'], ['add'], ['enchantment', "EnchantmentId"], ["level", "Integer", 0, 5], ["price", "Integer", 1, 64]], addTradeSetupTask).process();
+new LinearCommand([['tradeSetup'], ['togglePause']],fun () {togglePause();} ).process();
+new LinearCommand([['tradeSetup'], ['paperMode']],togglePaperMode ).process();
+new LinearCommand([['tradeSetup'], ['save']],saveListTask ).process();
+new LinearCommand([['tradeSetup'], ['refresh']],refreshLecternTask ).process();
+new LinearCommand([['tradeSetup'], ['load']],loadListTask ).process();
+new LinearCommand([['tradeSetup'], ['loadAndRun']],loadListAndRunTask ).process();
+new LinearCommand([['tradeSetup'], ['removeAndSaveRun']],removeAndSaveRunTaskAuto ).process();
+new LinearCommand([['tradeSetup'], ['removeAndSaveRun'], ['enchantname', 'Word', suggestExistingSetup]],removeAndSaveRunTask ).process();
+new LinearCommand([['tradeSetup'], ['print']],printCurrentEnchantTask ).process();
+new LinearCommand([['tradeSetup'], ['help']],showhelp ).process();
+new LinearCommand([['tradeSetup'], ['run']], fun () {isPaused = false;} ).process();
+new LinearCommand([['tradeSetup'], ['addAll'], ['enchantments', 'Word']], fun(enchantments){addToEnchantsParsed(enchantments);}).process();
+new LinearCommand([['tradeSetup'], ['loadDefault']], loadDefaultTask ).process();
+new LinearCommand([['tradeSetup'], ['remove'],['toRemove', "Word", suggestExistingSetup]], removeTradeSetupTask ).process();
+//doTradeSetup('fortune', 3, 64);
+player.message('/tradeSetup help to get help');
+
+
+while (true) {
+    if(isPaused || !found){sleep(1000);player.messageActionBar('paused');continue;}
+    trial ++;
+    player.messageActionBar('trial'+ trial);
+    if (sneakWhenBreak) player.setSneaking(false);
+    placeBlock();
+    sleep(100);
+    while (player.getCurrentScreen() == null || !player.getCurrentScreen().instanceOf("MerchantScreen") ){
+    allEntities = client.getWorld().getAllEntities();
+    foreach (entity : allEntities) {
+        if (entity.getId() == "villager" && player.getSquaredDistanceTo(entity) < 5) {
+            player.interactWithEntity(entity);
+        }
+    }
+    sleep(300);}
+    screen = player.getCurrentScreen();
+    index = screen.getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
+    if (index == null) {
+        player.closeScreen();
+
+        if (sneakWhenBreak) player.setSneaking(true);
+        sleep(200);
+        swapToaxe();
+        player.attackBlock(bx,by,bz,"up");
+        while (world.getBlockAt(bx,by,bz).getId() == 'lectern') {
+            if (sneakWhenBreak) player.setSneaking(true);
+            //player.lookAtPos(bx,by,bz);
+            player.updateBreakingBlock(bx,by,bz);
+            player.swingHand('main');
+            sleep(50);
+        }
+        sleep(100);
+        if(papermode) sleep(2000);
+        continue;
+    }
+    else {
+        sleep(100);
+        item = screen.getTradeItemForIndex(index);
+        value = screen.getPriceForIndex(index);
+        enchant = item.getEnchantments();
+        foreach (keys : enchant.getKeys()) {
+        val = enchant.get(keys);
+        mapval = mapFor.get(keys);
+        player.message(keys +'lv' + val+ 'price'+value);
+        foreach(enchantNames : enchantlists.getKeys()){
+            lvls = enchantlists.get(enchantNames).get('lvl');
+            prices = enchantlists.get(enchantNames).get('price');
+            if (enchantNames != keys || val < lvls || value > prices){
+                isWanted = false;
+            }
+            if (enchantNames == keys && (val < lvls || value > prices)){
+                player.message(keys +'lv' + val+ 'price'+value + ' was lower value than lv '+ lvls + ' price ' + prices);
+            }
+            if (enchantNames == keys && val >= lvls && value <= prices) {
+                isWanted = true;
+                auto = enchantNames;
+                client.playSound("entity.lightning_bolt.thunder", 1, 1);
+                if (fixTrade){
+                    while(!screen.isTradeSelected()){
+                        screen.selectTrade(index);
+                        sleep(100);
+                    }
+                    screen.tradeSelectedAndThrow();
+                }
+                break;
+            } else {
+                isWanted = false;
+            }
+        }
+        }
+    }
+    if (isWanted != true){
+        player.closeScreen();
+        if (sneakWhenBreak) player.setSneaking(true);
+        swapToaxe();
+        sleep(20);
+        player.attackBlock(bx,by,bz,"up");
+        while (world.getBlockAt(bx,by,bz).getId() == 'lectern') {
+            //swapToaxe();
+            if (sneakWhenBreak) player.setSneaking(true);
+            player.updateBreakingBlock(bx,by,bz);
+            player.swingHand('main');
+            sleep(50);
+        }
+        sleep(100);
+        if(papermode) sleep(2000);
+    }
+    else {
+        client.playSound("entity.lightning_bolt.thunder", 1, 1);
+        isPaused = true;
+        isWanted = false;
+        found = false;
+    }
+}

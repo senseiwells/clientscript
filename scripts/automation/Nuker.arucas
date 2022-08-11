@@ -1,0 +1,184 @@
+import * from Minecraft;
+import Java from util.Internal;
+client = MinecraftClient.getClient();
+clientJava = Java.valueOf(client);
+player = client.getPlayer();
+world = client.getWorld();
+
+playerReach = 6;
+//copy paste of pistonbolt script
+executedTimes = 0;
+sleepInterval = 50;
+useCobble = false;
+fun swapToPickaxe() {
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
+        return true;
+    }
+	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
+	if (slot == null) {
+		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
+	}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    player.setSelectedSlot(slot-36);
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			player.swapPlayerSlotWithHotbar(slot);
+			player.setSelectedSlot(preslot);
+			return true;
+		}
+	}
+	if (slot == null) {
+	    if (player.getGamemode() == 'creative'){
+	        preslot = player.getSwappableHotbarSlot();
+	        clientJava.interactionManager.clickCreativeStack(Java.valueOf(ItemStack.of(Material.of("netherite_pickaxe"))), Java.intOf(36 + preslot));
+	        player.setSelectedSlot(preslot);
+	        return true;
+	    }
+	}
+	return false;
+}
+fun swapToItem(itemString){
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+        return true;
+    }
+	if (itemString == "air") {
+		swapToPickaxe();
+		return false;}
+	foreach(i : [0,1,2,3,4,5,6,7,8]){
+		if(player.getItemForPlayerSlot(i).getId() == itemString){
+			player.setSelectedSlot(i);
+			return true;
+		}
+	}
+	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
+	retVal = false;
+	if (slot == null) {
+	    if (player.getGamemode() == 'creative'){
+	        //preslot = player.getSwappableHotbarSlot();
+	        clientJava.interactionManager.clickCreativeStack(Java.valueOf(ItemStack.of(Material.of(itemString))), Java.intOf(36 + player.getCurrentSlot()));
+	        //player.setSelectedSlot(preslot);
+	        sleep(50);
+	        return true;
+	    }
+	}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    player.setSelectedSlot(slot-36);
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			player.swapPlayerSlotWithHotbar(slot);
+			player.setSelectedSlot(preslot);
+			return true;
+		}
+	}
+	return null;
+}
+class PredicateUtils{
+    static fun mergedPredicate(predicates...){
+        return fun (value){
+            foreach(pred : predicates){
+                if(!pred(value)){
+                    return false;
+                }
+            }
+            return true;
+        };
+    }
+}
+class NukerHax {
+    static fun predicateBlock(blockName){
+        return fun (pos){ block = world.getBlockAt(pos);return block.getId() == blockName;};
+    }
+    static fun predicateBlockProperty(blockName, propertyMap){
+        return fun (pos){ block = world.getBlockAt(pos);
+            if(block.getId() == blockName){
+                blockProp = block.getBlockProperties();
+                foreach ( prop : propertyMap.getKeys()){
+                    if (blockProp.get(prop) != propertyMap.get(prop)){
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        };
+    }
+    static fun predicateReach(reachDistance){
+        return fun (pos){px,py,pz = pos.toList(); ax, ay, az = player.getPos().toList(); return (px-ax)^2 + (py-ay)^2 + (pz-az)^2 < reachDistance * reachDistance;};
+    }
+    static fun toolSwitch(){
+        swapToPickaxe();
+    }
+    static fun iterate(predicate, action){
+        foreach (pos : world.getPositions(player.getPos().add(new Pos(-playerReach, -playerReach, -playerReach)), player.getPos().add(new Pos(playerReach, playerReach, playerReach)))){
+            if(predicate(pos)){
+                action(pos);
+            }
+            executedTimes++;
+        }
+    }
+    static fun defaultAttack(){
+        return fun(position){player.attackBlock(position, 'up');};
+    }
+    static fun defaultInteractBlockWith(blockName){
+        return fun(position){swapToItem(blockName);player.interactBlock(position, 'up');};
+    }
+    static fun defaultInteractBlockWithSet(blockName, set){
+        return fun(position){if(set.contains(position)){return;}swapToItem(blockName);set.add(position);player.interactBlock(position, 'up');};
+    }
+    static fun defaultInteractBlockThenSleep(blockName, set){
+        return fun(position){if(set.contains(position)){return;}swapToItem(blockName);set.add(position);player.interactBlock(position, 'up');sleep(sleepInterval);};
+    }
+}
+predicateIce = NukerHax.predicateBlock('ice');
+predicateLava = NukerHax.predicateBlockProperty('lava', {'level' : 0});
+predicateWater = NukerHax.predicateBlockProperty('water', {'level' : 0});
+predB = NukerHax.predicateReach(playerReach);
+breakAction = NukerHax.defaultAttack();
+predicateIceMerged = PredicateUtils.mergedPredicate(predicateIce, predB);
+waterRemovalCobbleAction = NukerHax.defaultInteractBlockWithSet('slime_block', Set.of());
+waterRemovalSpongeAction = NukerHax.defaultInteractBlockThenSleep('sponge', Set.of());
+lavaSpongeAction = NukerHax.defaultInteractBlockWithSet('cobblestone', Set.of());
+predicateLavaMerged = PredicateUtils.mergedPredicate(predicateLava, predB);
+predicateWaterMerged = PredicateUtils.mergedPredicate(predicateWater, predB);
+while(false){
+    sleep(5);
+    executedTimes = 0;
+    time = getMilliTime();
+    NukerHax.iterate(predicateIceMerged, breakAction);
+    if(executedTimes == 0){
+        executedTimes++;
+    }
+    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+}
+
+while(false){
+    sleep(5);
+    executedTimes = 0;
+    time = getMilliTime();
+    NukerHax.iterate(predicateLavaMerged, lavaSpongeAction);
+    if(executedTimes == 0){
+        executedTimes++;
+    }
+    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+}
+while(true){
+    sleep(5);
+    executedTimes = 0;
+    time = getMilliTime();
+    if(useCobble){
+        NukerHax.iterate(predicateWaterMerged, waterRemovalCobbleAction);
+    }
+    else {
+        NukerHax.iterate(predicateWaterMerged, waterRemovalSpongeAction);
+    }
+    if(executedTimes == 0){
+        executedTimes++;
+    }
+    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+}
