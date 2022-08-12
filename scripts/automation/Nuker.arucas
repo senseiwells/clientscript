@@ -1,15 +1,20 @@
 import * from Minecraft;
 import Java from util.Internal;
+import * from minecraft.CommandUtils;
 client = MinecraftClient.getClient();
 clientJava = Java.valueOf(client);
 player = client.getPlayer();
 world = client.getWorld();
 
-playerReach = 6;
+playerReach = 8;
 //copy paste of pistonbolt script
 executedTimes = 0;
 sleepInterval = 50;
 useCobble = false;
+useOffHand = true;
+iceNuker = false;
+lavaSponge = false;
+waterSponge = false;
 fun swapToPickaxe() {
     if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
         return true;
@@ -41,6 +46,9 @@ fun swapToPickaxe() {
 	return false;
 }
 fun swapToItem(itemString){
+    if (player.getItemForSlot(45).getId() == itemString){
+        return true;
+    }
     if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
         return true;
     }
@@ -126,13 +134,42 @@ class NukerHax {
         return fun(position){player.attackBlock(position, 'up');};
     }
     static fun defaultInteractBlockWith(blockName){
-        return fun(position){swapToItem(blockName);player.interactBlock(position, 'up');};
+        return fun(position){
+            swapToItem(blockName);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+        };
     }
     static fun defaultInteractBlockWithSet(blockName, set){
-        return fun(position){if(set.contains(position)){return;}swapToItem(blockName);set.add(position);player.interactBlock(position, 'up');};
+        return fun(position){
+        if(set.contains(position)){return;}
+            swapToItem(blockName);
+            set.add(position);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+        };
     }
     static fun defaultInteractBlockThenSleep(blockName, set){
-        return fun(position){if(set.contains(position)){return;}swapToItem(blockName);set.add(position);player.interactBlock(position, 'up');sleep(sleepInterval);};
+        return fun(position){
+        if(set.contains(position)){return;}
+            swapToItem(blockName);
+            set.add(position);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+            sleep(sleepInterval);
+        };
     }
 }
 predicateIce = NukerHax.predicateBlock('ice');
@@ -146,39 +183,53 @@ waterRemovalSpongeAction = NukerHax.defaultInteractBlockThenSleep('sponge', Set.
 lavaSpongeAction = NukerHax.defaultInteractBlockWithSet('cobblestone', Set.of());
 predicateLavaMerged = PredicateUtils.mergedPredicate(predicateLava, predB);
 predicateWaterMerged = PredicateUtils.mergedPredicate(predicateWater, predB);
-while(false){
-    sleep(5);
-    executedTimes = 0;
-    time = getMilliTime();
-    NukerHax.iterate(predicateIceMerged, breakAction);
-    if(executedTimes == 0){
-        executedTimes++;
-    }
-    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
-}
 
-while(false){
-    sleep(5);
-    executedTimes = 0;
-    time = getMilliTime();
-    NukerHax.iterate(predicateLavaMerged, lavaSpongeAction);
-    if(executedTimes == 0){
-        executedTimes++;
+fun doActions(){
+    if(iceNuker){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        NukerHax.iterate(predicateIceMerged, breakAction);
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
     }
-    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    if(lavaSponge){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        NukerHax.iterate(predicateLavaMerged, lavaSpongeAction);
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
+
+    if(waterSponge){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        if(useCobble){
+            NukerHax.iterate(predicateWaterMerged, waterRemovalCobbleAction);
+        }
+        else {
+            NukerHax.iterate(predicateWaterMerged, waterRemovalSpongeAction);
+        }
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
 }
-while(true){
+lavaSpongeOnOffTask = fun(){lavaSponge = !lavaSponge;};
+waterSpongeOnOffTask = fun(){waterSponge = !waterSponge;};
+iceNukerOnOffTask = fun(){iceNuker = !iceNuker;};
+new LinearCommand([['lavaSponge']], lavaSpongeOnOffTask).process();
+new LinearCommand([['waterSponge']], waterSpongeOnOffTask).process();
+new LinearCommand([['iceNuker']], iceNukerOnOffTask).process();
+
+while (true){
+    doActions();
     sleep(5);
-    executedTimes = 0;
-    time = getMilliTime();
-    if(useCobble){
-        NukerHax.iterate(predicateWaterMerged, waterRemovalCobbleAction);
-    }
-    else {
-        NukerHax.iterate(predicateWaterMerged, waterRemovalSpongeAction);
-    }
-    if(executedTimes == 0){
-        executedTimes++;
-    }
-    player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
 }

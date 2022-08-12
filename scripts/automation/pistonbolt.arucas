@@ -4,6 +4,8 @@ import LinearCommand from minecraft.CommandUtils;
 import DefaultSuggester from minecraft.CommandUtils;
 import * from minecraft.PosUtils;
 import * from minecraft.MinecraftUtils;
+import * from minecraft.InventoryUtils;
+
 
 client = MinecraftClient.getClient();
 clientJava = Java.valueOf(client);
@@ -11,6 +13,9 @@ clientJava = Java.valueOf(client);
 jWorld = clientJava.world;
 player = client.getPlayer();
 world = client.getWorld();
+
+
+
 playerReach = 4.5;
 accurateBlockPlacement = false;
 carefulBreakSneak = false;
@@ -47,6 +52,8 @@ singleUsePosSet = Set.of();
 AreaPos1 = null;
 AreaPos2 = null;
 
+inventoryAccess = new InventoryUtil(player);
+//inventoryAccess.debug = true;
 // Functions
 fun assertHaste(){
     foreach ( effectname : player.getStatusEffects()){
@@ -55,59 +62,8 @@ fun assertHaste(){
     }
     return false;
 }
-fun assertInHotbar(items){
-    //put all items in hotbar.
-    //This should only be called when total count is less then 10.
-    availableSet = new DefaultedMap([0,1,2,3,4,5,6,7,8]);
-    itemSet = new DefaultedMap(items);
-    foreach ( itemString : items){
-        hotbarKey = isInHotbar(itemString);
-        if ( hotbarKey != null){
-        availableSet.remove(hotbarKey);
-        itemSet.remove(itemString);
-        }
-    }
-    //now leftorvers
-    foreach( itemString : itemSet.getKeys()){
-        retval = swapHotbarSlotWithItem(availableSet.poll(), itemString);
-        if (retval == null){
-            throw new Error("Cannot swap item " + itemString + ' with slot number '+ availableSet.poll());
-        }
-        availableSet.remove(retval);
-    }
-}
-fun swapHotbarSlotWithItem(slotNum, itemString){
-    //swaps hotbar slot number with desired item, returns result.
-    //first check hotbar
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId().contains(itemString)){
-			return i;
-		}
-	}
-	//then check all items
-    if (itemString == 'pickaxe'){
-	    slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
-	    if (slot == null) {
-	    	slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
-	    }
-    }
-    else {
-        slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-    }
-    if (slot == null){
-    //no items found.
-        return false;
-    }
-    player.swapSlots(slotNum + 36, slot);
-    return slotNum;
-}
 fun isInHotbar(itemString){
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId().contains(itemString)){
-			return i;
-		}
-	}
-	return null;
+    return inventoryAccess.isInHotbar(itemString);
 }
 fun checkCanPlaceAt(position, block){
     jBlock = Java.valueOf(block); //blockState
@@ -115,134 +71,24 @@ fun checkCanPlaceAt(position, block){
     return jBlock.getBlock().canPlaceAt(jBlock, jWorld, jPosition).toArucas();
 }
 fun swapToItem(itemString){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
-        return true;
-    }
-	if (itemString == "air") {
-		swapToPickaxe();
-		return false;}
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId() == itemString){
-			player.setSelectedSlot(i);
-			return true;
-		}
-	}
-	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-	retVal = false;
-	if (slot == null) {
-	    if (player.getGamemode() == 'creative'){
-	        messageHolder.sendDebugMessage('pick from creative');
-	        //preslot = player.getSwappableHotbarSlot();
-	        clientJava.interactionManager.clickCreativeStack(Java.valueOf(ItemStack.of(Material.of(itemString))), Java.intOf(36 + player.getCurrentSlot()));
-	        //player.setSelectedSlot(preslot);
-	        sleep(50);
-	        return true;
-	    }
-	}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    player.setSelectedSlot(slot-36);
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			player.swapPlayerSlotWithHotbar(slot);
-			player.setSelectedSlot(preslot);
-			return true;
-		}
-	}
-	return null;
+    return inventoryAccess.swapToItem(itemString);
 }
 fun checkItem(itemString){
-    if (player.getGamemode() == 'creative'){
-        return true;
-    }
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
-        return true;
-    }
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId() == itemString){
-			return true;
-		}
-	}
-	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-	retVal = false;
-	if (slot == null) {return false;}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			return true;
-		}
-	}
-	messageHolder.sendMessage("Can't find "+ itemString+" in inventory");
-	return null;
+    return inventoryAccess.checkItem(itemString);
 }
 // Swaps to pickaxe.
 fun swapToPickaxe(){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
-        return true;
-    }
-	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
-	if (slot == null) {
-		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
-	}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    player.setSelectedSlot(slot-36);
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			player.swapPlayerSlotWithHotbar(slot);
-			player.setSelectedSlot(preslot);
-			return true;
-		}
-	}
-	if (slot == null) {
-	    if (player.getGamemode() == 'creative'){
-	        messageHolder.sendDebugMessage('pick from creative');
-	        preslot = player.getSwappableHotbarSlot();
-	        clientJava.interactionManager.clickCreativeStack(Java.valueOf(ItemStack.of(Material.of("netherite_pickaxe"))), Java.intOf(36 + preslot));
-	        player.setSelectedSlot(preslot);
-	        return true;
-	    }
-	}
-	return false;
+    return inventoryAccess.swapToPickaxe();
 }
 fun checkPickaxe(){
-    if(player.getGamemode() == 'creative'){
-        return true;
-    }
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
-        return true;
-    }
-	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
-	if (slot == null) {
-		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
-	}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			return true;
-		}
-	}
-	messageHolder.sendMessage("Can't find pickaxe in inventory");
-	return false;
+    return inventoryAccess.checkPickaxe();
 }
 fun assertItem(itemString){
-    swapToItem(itemString);
-    return player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString;
+    return inventoryAccess.assertItem(itemString);
 }
 
 fun assertTool(){
-    swapToPickaxe();
-    return player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains('pickaxe');
+    return inventoryAccess.assertTool();
 }
 fun breakBlock(pos, requireSneak){
     if (Type.of(pos).getName() != 'Pos'){
@@ -691,6 +537,16 @@ class DefaultedMap {
         this.defaultValue = defaultValue;
         foreach (item : items){
             this.map.put(item, this.defaultValue);
+        }
+    }
+    fun addAll(values){
+        if (Type.of(values).getName() == 'List'){
+            foreach (item : values){
+                this.map.put(item, this.defaultValue);
+            }
+        }
+        else {
+            this.map.addAll(values);
         }
     }
     fun getValues(){
@@ -1318,19 +1174,19 @@ class WaitingTask {
         if (this.shouldBreak){
             return 'failed to break block at '+ this.pos.formatted();
         }
-        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate';
+        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate ' + this.facing;
     }
     fun formatted(){
         if (this.shouldBreak){
             return 'break block at '+ this.pos.formatted();
         }
-        return 'place ' + this.itemString + ' at ' + this.pos.formatted()+ ' with predicate';
+        return 'place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate ' + this.facing;
     }
     fun formattedSuccess(){
         if (this.shouldBreak){
             return 'broke block at '+ this.pos.formatted() + ' at' + getMilliTime();
         }
-        return 'placed ' + this.itemString + ' at ' + this.pos.formatted()+ ' with predicate at '+ getMilliTime();
+        return 'placed ' + this.itemString + ' at ' + this.pos.formatted()+ ' with predicate at ' + this.facing + getMilliTime();
     }
     fun copy(){
         return new WaitingTask(this.pos.copy(), this.shouldBreak, this.item, this.facing,this.predicate, this.optional + 1);

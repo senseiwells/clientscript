@@ -1,0 +1,286 @@
+import * from Minecraft;
+import Java from util.Internal;
+import LinearCommand from minecraft.CommandUtils;
+import * from minecraft.PosUtils;
+import Predicate from util.Predicates;
+import * from minecraft.MinecraftUtils;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+clientJava = Java.valueOf(client);
+sleepInterval = 5;
+reachDistance = 4.5;
+fun isObsidian(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).getId() == 'obsidian';
+}
+fun isSlime(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).getId() == 'slime_block' ||  !world.getBlockAt(p).isReplaceable();
+}
+fun isAir(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).isReplaceable();
+}
+fun isReplaceable(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).isReplaceable();
+}
+// pick axis, expand,
+fun getSquareForDirection(pos, direction){
+    i = 1;
+    while (i <24){
+        if (isObsidian(pos.offset(direction, i))){
+            if (isObsidian(pos.offset(direction, i).up())){
+                break;
+            }
+        }
+        else {
+            return null;
+        }
+        i++;
+    }
+    if (i == 24){
+        return null;
+    }
+    if (i <3){
+        return null;
+    }
+    j = i-1;
+    k = 1;
+    while (k < 24){
+        if (isObsidian(pos.offset(direction, j).up(k))){
+            break;
+        }
+        k++;
+    }
+    if (k == 24){
+        return null;
+    }
+    return [j, k-1];
+}
+fun swapToItem(itemString){
+    if (player.getItemForSlot(45).getId() == itemString){
+        return true;
+    }
+    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+        return true;
+    }
+	if (itemString == "air") {
+		swapToPickaxe();
+		return false;}
+	foreach(i : [0,1,2,3,4,5,6,7,8]){
+		if(player.getItemForPlayerSlot(i).getId() == itemString){
+			player.setSelectedSlot(i);
+			return true;
+		}
+	}
+	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
+	retVal = false;
+	if (slot == null) {
+	    if (player.getGamemode() == 'creative'){
+	        //preslot = player.getSwappableHotbarSlot();
+	        clientJava.interactionManager.clickCreativeStack(Java.valueOf(ItemStack.of(Material.of(itemString))), Java.intOf(36 + player.getCurrentSlot()));
+	        //player.setSelectedSlot(preslot);
+	        sleep(50);
+	        return true;
+	    }
+	}
+	if (slot != null) {
+		if (0 <= slot-36 && slot-36  <= 8) {
+		    player.setSelectedSlot(slot-36);
+		    return true;
+		}
+		else {
+			preslot = player.getSwappableHotbarSlot();
+			player.swapPlayerSlotWithHotbar(slot);
+			player.setSelectedSlot(preslot);
+			return true;
+		}
+	}
+	return null;
+}
+
+fun getDirectionFromObsidian(pos){
+    foreach (direction : Direction.horizontal()){
+        if (isObsidian(pos.offset(direction))){
+            return direction;
+        }
+    }
+    return null;
+}
+class InteractUtils {
+    static fun defaultAttack(){
+        return fun(position){
+        position = new PosWithFun(position);
+        if (!position.isNear(player, reachDistance)){
+            return;
+        }
+        position = position.asPos();
+        player.attackBlock(position, 'up');sleep(sleepInterval);};
+    }
+    static fun defaultInteractBlockWith(blockName, useOffHand){
+        return fun(position){
+            position = new PosWithFun(position);
+            if (!position.isNear(player, reachDistance)){
+                return;
+            }
+            position = position.asPos();
+            if (world.getBlockAt(position).getId() == blockName){
+                return;
+            }
+            swapToItem(blockName);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+            sleep(sleepInterval);
+        };
+    }
+    static fun litPortal(useOffHand){
+        return fun(position){
+            position = new PosWithFun(position);
+            if (!position.isNear(player, reachDistance)){
+                return;
+            }
+            position = position.asPos();
+            if (world.getBlockAt(position).getId() == 'nether_portal' || world.getBlockAt(position.add(0,-1,0)).getId() != 'obsidian'){
+                return;
+            }
+            swapToItem('flint_and_steel');
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+            sleep(300);
+        };
+    }
+}
+class Rect{
+    var pos1;
+    var pos2;
+    Rect(pos1, size, direction){
+        this.pos1 = pos1;
+        this.pos2 = pos1.offset(direction, size.get(0)-1).up(size.get(1)-1);
+    }
+    Rect(pos1, pos2){
+        this.pos1 = pos1;
+        this.pos2 = pos2;
+    }
+    fun apply(consumer){
+        arr = world.getPositions(this.pos1.asPos(), this.pos2.asPos());
+        foreach (pos : arr){
+            consumer(pos);
+        }
+    }
+    fun predicates(predicate){
+        arr = world.getPositions(this.pos1.asPos(), this.pos2.asPos());
+        foreach ( pos : arr){
+            if (!predicate(pos)){
+                return false;
+            }
+        }
+        return true;
+    }
+    fun formatted(){
+        return this.pos1.formatted() + ' to ' + this.pos2.formatted();
+    }
+    fun move(direction, amount){
+        return new Rect(this.pos1.offset(direction, amount), this.pos2.offset(direction, amount));
+    }
+    fun move(direction){
+        return this.move(direction, 1);
+    }
+}
+fun doForRect(startPos){
+    dir = getDirectionFromObsidian(startPos);
+    if (dir == null){
+        return null;
+    }
+    rect1 = getSquareForDirection(startPos, dir);
+    if (rect1 == null){
+        rect1 = getSquareForDirection(startPos, dir.getOpposite());
+        dir = dir.getOpposite();
+    }
+    if (rect1 == null){
+        return null;
+    }
+    if (!startPos.isNear(player, reachDistance)){
+        return true;
+    }
+    portalPos = startPos.offset(dir).up();
+    portalRect = new Rect(portalPos, rect1, dir);
+    slimeRect1 = portalRect.move(dir.rotateYClockwise());
+    slimeRect2 = portalRect.move(dir.rotateYCounterclockwise());
+    while (!slimeRect1.predicates(isSlime)){
+        slimeRect1.apply(placeSlime);
+    }
+    while (!portalRect.predicates(isSlime)){
+        portalRect.apply(placeSlime);
+    }
+    while (!slimeRect2.predicates(isSlime)){
+        slimeRect2.apply(placeSlime);
+    }
+    while (!portalRect.predicates(isAir)){
+        portalRect.apply(removeSlime);
+    }
+    portalRect.apply(litPortal);
+    while (!slimeRect1.predicates(isAir)){
+        slimeRect1.apply(removeSlime);
+    }
+    while (!slimeRect2.predicates(isAir)){
+        slimeRect2.apply(removeSlime);
+    }
+}
+
+doForArea = fun(px, py, pz, ex, ey, ez){
+
+    while (true){
+        shouldLoop = false;
+        foreach ( positions : world.getPositions(new Pos(px,py,pz), new Pos(ex, ey, ez))){
+            shouldLoop = doForRect(new PosWithFun(positions));
+        }
+        if (shouldLoop != true){
+            player.message("Finished without loop");
+            break;
+        }
+    }
+};
+doRectTask = fun (x,y,z){
+    doForRect(new PosWithFun(x,y,z));
+};
+
+rayTraceX = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getX())];
+    }
+    return [player.getLookingAtBlock().getX()];
+};
+rayTraceY = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getY())];
+    }
+    return [player.getLookingAtBlock().getY()];
+};
+rayTraceZ = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getZ())];
+    }
+    return [player.getLookingAtBlock().getZ()];
+};
+placeSlime = InteractUtils.defaultInteractBlockWith('slime_block', false);
+removeSlime = InteractUtils.defaultAttack();
+litPortal = InteractUtils.litPortal(false);
+
+new LinearCommand([['litPortal'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ] ], doRectTask).process();
+new LinearCommand([['litPortal'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],
+                        ['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], doForArea).process();
+hold();
