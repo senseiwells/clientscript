@@ -77,7 +77,7 @@ findImmovableCommand = {
     "name" : "findImmovable",
     "subcommands" : {
         "find" : {
-            "" : findObsidian,
+            "" : findImmovable,
             "start" : {
                 "" : fun() {
                     print("Started searching for immovable blocks");

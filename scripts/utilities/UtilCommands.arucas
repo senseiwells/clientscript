@@ -3,8 +3,8 @@ import * from Minecraft;
 client = MinecraftClient.getClient();
 me = client.getPlayer();
 
-Entities = CommandBuilder.literal("entities");
-Entities.executes(fun(){
+entities = CommandBuilder.literal("entities");
+entities.executes(fun() {
     allEntities = client.getWorld().getAllEntities();
     entityCount = {};
 
@@ -29,25 +29,25 @@ Entities.executes(fun(){
     print(entityCount);
 
 });
-
-client.addCommand(Entities);
+client.addCommand(entities);
 
 listToString = null;
 
 fun mapToString(map){
     string = "{";
     keys = map.getKeys();
-    foreach(key : keys)
-    {
+    foreach (key : keys) {
         string = string + key;
         string = string + ": ";
-        if(map.get(key).getValueType()=="Map"){
+        if (map.get(key).getValueType()=="Map") {
             string = string + mapToString(map.get(key));
         }
-        else if(map.get(key).getValueType()=="List"){
+        else if (map.get(key).getValueType()=="List") {
             string = string + listToString(map.get(key));
         }
-        else string = string + map.get(key);
+        else {
+            string = string + map.get(key);
+        }
 
         string = string + ", ";
     }
@@ -55,52 +55,50 @@ fun mapToString(map){
     return string;
 }
 
-fun listToString(List){
+fun listToString(list){
     string = "[";
-    foreach(item : List){
-        if(item.getValueType()=="Map"){
+    foreach (item : list){
+        if(item.instanceOf(Map.type)){
             string = string + mapToString(item);
         }
-        else if(item.getValueType()=="List"){
+        else if(item.instanceOf(List.type)){
             string = string + listToString(item);
         }
-        else string = string + item;
+        else {
+            string = string + item;
+        }
 
         string = string + ", ";
     }
-    string = string+ "]";
+    string = string + "]";
     return string;
 }
 
-
 nbt = CommandBuilder.literal("nbt");
-nbt.executes(fun(){
+nbt.executes(fun() {
     print(mapToString(me.getHeldItem().getNbt()));
 });
 client.addCommand(nbt);
 
-
-
-
 pos = CommandBuilder.literal("pos");
-pos.executes(fun(){
-    switch(me.getDimension()){
-        case "overworld" ->{
-            print("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
-            x = me.getX()/8;
-            y = me.getY()/8;
-            z = me.getZ()/8;
-            print("Nether coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+pos.executes(fun() {
+    switch(me.getDimension()) {
+        case "overworld" -> {
+            print("Current coordinates: " + me.getX().floor() + " " + me.getY().floor() + " " + me.getZ().floor());
+            x = me.getX() / 8;
+            y = me.getY() / 8;
+            z = me.getZ() / 8;
+            print("Nether coordinates: " + x.floor() + " " + y.floor() + " " + z.floor());
         }
-        case "the_nether" ->{
-            print("Current coordinates: "+me.getX().floor()+" "+me.getY().floor()+" "+me.getZ().floor());
-            x = me.getX()*8;
-            y = me.getY()*8;
-            z = me.getZ()*8;
-            print("Overworld coordinates: "+x.floor()+" "+y.floor()+" "+z.floor());
+        case "the_nether" -> {
+            print("Current coordinates: " + me.getX().floor() + " " + me.getY().floor() + " " + me.getZ().floor());
+            x = me.getX() * 8;
+            y = me.getY() * 8;
+            z = me.getZ() * 8;
+            print("Overworld coordinates: " + x.floor() + " " + y.floor() + " " + z.floor());
         }
-        case "the_end" ->{
-            print("Current coordinates: "+me.getPos());
+        case "the_end" -> {
+            print("Current coordinates: " + me.getPos());
         }
     }
 });
