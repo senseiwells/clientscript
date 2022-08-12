@@ -97,9 +97,8 @@ fun breakBlock(pos, requireSneak){
 	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).isFluid() || world.isAir(pos)) {
 	    player.attackBlock(pos,'up');
 	    messageHolder.sendDebugMessage("Block "+ pos + world.getBlockAt(pos)+" was not breakable");
-	    if (world.getBlockAt(pos).getId() == 'moving_piston'){
-	        messageHolder.sendDebugMessage("Block "+ pos + world.getBlockAt(pos)+" was moving piston, waiting 100ms and breaking...");
-	        sleep(100);
+	    if(world.getBlockAt(pos).getId() == 'moving_piston'){
+	        messageHolder.sendDebugMessage("Block "+ pos + world.getBlockAt(pos)+" was moving piston, waiting 10ms and breaking...");
 	        player.attackBlock(pos,'up');
 	    }
 	    return;
@@ -108,7 +107,10 @@ fun breakBlock(pos, requireSneak){
 	    player.attackBlock(pos,'up');
 	    return;
 	}
-	if (!world.getBlockAt(pos).isReplaceable() ) {
+	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).getHardness() == 0 && world.getBlockAt(pos).isReplaceable()){
+	    return;
+	}
+	if (!world.getBlockAt(pos).isReplaceable()) {
 	    assertTool();
         if (isBlockInstantBreakable(pos)){
             player.attackBlock(pos,'up');
@@ -132,6 +134,7 @@ fun isBlockInstantBreakable(pos){
     if (b.getId() == 'piston' || b.getId() == 'sticky_piston'){
          property = b.getBlockProperties();
          if (property.get('extended') && world.getBlockAt(pos.offset(property.get('facing'))).getId() == 'moving_piston'){
+            return false;
          }
     }
     messageHolder.sendDebugMessage(player.getBlockBreakingSpeed(b));
@@ -287,7 +290,7 @@ fun placeDirectionBlock(blockPos,itemString, direction, immediate){
 	    	if (!immediate){
 	    	    sleep(50);
 	    	}
-	    	player.interactBlock(x,py,z,direction.getName(),x,y,z,false);
+	    	player.interactBlock(x+ 0.5,py+ 0.5,z + 0.5,direction.getName(),x,y,z,false);
 	    	if (itemString.contains("rail")){
 	    	    if (!immediate){
 	    	        sleep(50);
@@ -363,6 +366,74 @@ fun pistonRetractFindingPredicate(blockPos, facing){
 // We place piston in pos A, with torch at pos B, then wait until it 'extends'. if moving piston is found, remove torch first then piston, and replace (torch - optional) then piston with new direction. pt-tp-tp
 //
 fun chainedPistonTaskRecord(record, headless){
+     facing1 = record.pistonFacing;
+    facing2 = record.finalFacing;
+    bedrockPos = record.pistonPos.offset(facing2);
+    torchFacing = record.torchFacing;
+    torchPos = record.torchPos;
+    pistonPos = record.pistonPos;
+    iter = new SequencedTaskIterator();
+    tempTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing1);
+        tempTask = new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(tempTask);
+    }
+    pistonPlace = new WaitingTask(pistonPos, pistonItem, facing1, fun (){if (tempTask == null){return true;} else {if(tempTask.isExecuted){return true;} else {return false;} }}); //place piston
+    iter.addAction(pistonPlace);
+    fakeTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing2);
+        fakeTask = new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(fakeTask);
+    }
+    placingTorch = new WaitingTask(torchPos, 'redstone_torch', torchFacing, fun (){if (fakeTask == null){return pistonPlace.isExecuted;} else {if(pistonPlace.isExecuted && fakeTask.isExecuted){return true;} else {return false;} }});
+    iter.addAction(placingTorch);
+    placingTorch.setImmediate(true);
+    breakingTorch = new WaitingTask(torchPos, fun () {if (placingTorch.isExecuted){sleep(50); return true;} return false;}); //break torch
+    breakingTorch.setImmediate(true);
+    iter.addAction(breakingTorch);
+    torchRemovePredicate = fun(){return breakingTorch.isExecuted;};
+    placeTorchAgain = new WaitingTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate); //break -> place so it retracts, but will extend again.
+    placeTorchAgain.setImmediate(true);
+    iter.addAction(placeTorchAgain);
+    /*
+    removePiston = new WaitingTask(pistonPos, fun(){return breakingTorch.isExecuted;}); //remove piston
+    removePiston.setImmediate(true);
+    iter.addAction(removePiston);
+    placePistonAgain = new WaitingTask(pistonPos, pistonItem, facing2, fun(){return removePiston.isExecuted;}); //place piston should be executed in same tick
+    placePistonAgain.setImmediate(true);
+    iter.addAction(placePistonAgain);
+    */
+    //break torch place torch break piston torch piston in same tick afap
+    lambdaTTPP = fun () {
+        while (Math.mod(getMilliTime(), 50) != 0){
+            sleep(1);
+        }
+        new Task(torchPos).executeUnchecked();
+        new Task(torchPos,'redstone_torch', torchFacing).executeUnchecked();
+        new Task(pistonPos).executeUnchecked();
+        new Task(pistonPos, pistonItem, facing2).executeUnchecked();
+        if (world.getBlockAt(pistonPos.offset(facing1).asPos()).getId().contains('piston')|| world.getBlockAt(pistonPos.offset(facing1,2).asPos()).getId().contains('piston')){
+            leftovers.addPos(pistonPos.offset(facing1));
+            leftovers.addPos(pistonPos.offset(facing1, 2));
+            new Task(bedrockPos, 'redstone_torch', Direction.UP).executeUnchecked();
+        }
+    };
+    removeAndPlacePistonTask = new LambdaTask(fun(){return breakingTorch.isExecuted;},lambdaTTPP );
+    iter.addAction(removeAndPlacePistonTask);
+
+
+    if (!headless){
+        //task7 = new WaitingTask(torchPos, fun (){if(placePistonAgain.isExecuted){sleep(20);return true;};return false;});
+        task7 = new WaitingTask(torchPos, fun (){if(removeAndPlacePistonTask.isExecuted){sleep(50);leftovers.addPos(pistonPos);return true;};return false;});
+        task7.setImmediate(true);
+        iter.addAction(task7);
+    }
+    iter.prettyPos = pistonPos;
+    return iter;
+}
+fun chainedPistonTaskRecord2(record, headless){ //backup of working code
     facing1 = record.pistonFacing;
     facing2 = record.finalFacing;
     bedrockPos = record.pistonPos.offset(facing2);
@@ -376,87 +447,39 @@ fun chainedPistonTaskRecord(record, headless){
         tempTask = new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return true;});
         iter.addAction(tempTask);
     }
-    task1 = new WaitingTask(pistonPos, pistonItem, facing1, fun (){if (tempTask == null){return true;} else {if(tempTask.isExecuted){sleep(10); return true;} else {return false;} }}); //place piston
-    iter.addAction(task1);
-    tempTask2 = null;
+    pistonPlace = new WaitingTask(pistonPos, pistonItem, facing1, fun (){if (tempTask == null){return true;} else {if(tempTask.isExecuted){sleep(10); return true;} else {return false;} }}); //place piston
+    iter.addAction(pistonPlace);
+    fakeTask = null;
     if (!accurateBlockPlacement){
         fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing2);
-        tempTask2 = new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return true;});
-        iter.addAction(tempTask2);
+        fakeTask = new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(fakeTask);
     }
-    task2 = new WaitingTask(torchPos, 'redstone_torch', torchFacing, fun (){if (tempTask2 == null){return task1.isExecuted;} else {if(task1.isExecuted && tempTask2.isExecuted){sleep(10); return true;} else {return false;} }});
-    iter.addAction(task2);
+    placingTorch = new WaitingTask(torchPos, 'redstone_torch', torchFacing, fun (){if (fakeTask == null){return pistonPlace.isExecuted;} else {if(pistonPlace.isExecuted && fakeTask.isExecuted){return true;} else {return false;} }});
+    iter.addAction(placingTorch);
+    placingTorch.setImmediate(true);
     //optional slime block placement.
-    task3 = new WaitingTask(torchPos, pistonHeadFindingPredicate(pistonPos, facing1)); //break torch
-    task3.setImmediate(true);
-    iter.addAction(task3);
-    torchRemovePredicate = fun(){return task3.isExecuted;};
-    task6 = new WaitingTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate);//we use secondary position that prevents desync
-    task4FinishPredicate = fun(){return task6.isExecuted;};
-    task6.setImmediate(true);
-    task4 = new WaitingTask(pistonPos, fun(){return task6.isExecuted;}); //remove piston
-    task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
-    task4.setImmediate(true);
-    task5 = new WaitingTask(pistonPos, pistonItem, facing2, task4FinishPredicate); //place piston
-    task5.setImmediate(true);
-    iter.addAction(task6);
-    iter.addAction(task4);
-    iter.addAction(task5);
+    //task3 = new WaitingTask(torchPos, pistonHeadFindingPredicate(pistonPos, facing1)); //break torch
+    breakingTorch = new WaitingTask(torchPos, fun () {if (placingTorch.isExecuted){sleep(50); return true;} return false;}); //break torch
+    breakingTorch.setImmediate(true);
+    iter.addAction(breakingTorch);
+    torchRemovePredicate = fun(){return breakingTorch.isExecuted;};
+    placeTorchAgain = new WaitingTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate);//we use secondary position that prevents desync
+    placeTorchAgain.setImmediate(true);
+    removePiston = new WaitingTask(pistonPos, fun(){return breakingTorch.isExecuted;}); //remove piston
+    removePistonFinishPredicate = fun(){return removePiston.isExecuted;}; //check if done
+    removePiston.setImmediate(true);
+    placePistonAgain = new WaitingTask(pistonPos, pistonItem, facing2, removePistonFinishPredicate); //place piston
+    placePistonAgain.setImmediate(true);
+    iter.addAction(placeTorchAgain);
+    iter.addAction(removePiston);
+    iter.addAction(placePistonAgain);
     if (!headless){
-        task7 = new WaitingTask(torchPos, fun (){if(task5.isExecuted){sleep(20);return true;};return false;});
+        task7 = new WaitingTask(torchPos, fun (){if(placePistonAgain.isExecuted){sleep(20);return true;};return false;});
+        task7.setImmediate(true);
         iter.addAction(task7);
         task8 = new WaitingTask(pistonPos, fun () {if (world.isAir(bedrockPos.asPos())){sleep(10); leftovers.addPos(pistonPos); return true;} else if (task7.isExecuted){leftovers.addPos(pistonPos); sleep(150); return true;}; return false;}); //remove piston
         iter.addAction(task8);
-    }
-    iter.prettyPos = pistonPos;
-    return iter;
-}
-fun chainedPistonTaskRecord2(record, headless){
-    facing1 = record.pistonFacing;
-    facing2 = record.finalFacing;
-    bedrockPos = record.pistonPos.offset(facing2);
-    torchFacing = record.torchFacing;
-    torchPos = record.torchPos;
-    pistonPos = record.pistonPos;
-    iter = new SequencedTaskIterator();
-    task1 = new Task(pistonPos, pistonItem, facing1); //place piston
-    iter.addAction(task1);
-    if (!accurateBlockPlacement){
-        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing2);
-        iter.addAction(new FakeLookWaitingTask(fy, fp, requiredDirection, fun () {return task1.isExecuted;}));
-    }
-    task2 = new Task(torchPos, 'redstone_torch', torchFacing); //place torch
-    iter.addAction(task2);
-    //optional slime block placement.
-    task3 = new WaitingTask(torchPos, pistonHeadFindingPredicate(pistonPos, facing1)); //break torch
-    task3.setImmediate(true);
-    iter.addAction(task3);
-    torchRemovePredicate = fun(){return task3.isExecuted;};
-    if (headless){
-        task6 = new WaitingTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate);//we use secondary position that prevents desync
-        task4FinishPredicate = fun(){return task6.isExecuted;};
-        task6.setImmediate(true);
-        task4 = new WaitingTask(pistonPos, fun(){return task6.isExecuted;}); //remove piston
-        task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
-        task4.setImmediate(true);
-        task5 = new WaitingTask(pistonPos, pistonItem, facing2, task4FinishPredicate); //place piston
-        task5.setImmediate(true);
-        iter.addAction(task6);
-        iter.addAction(task4);
-        iter.addAction(task5);
-    }
-    else {
-        task4 = new WaitingTask(pistonPos, torchRemovePredicate); //remove piston
-        task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
-        task4.setImmediate(true);
-        task5 = new WaitingTask(pistonPos, pistonItem, facing2, task4FinishPredicate); //place piston
-        task5.setImmediate(true);
-        iter.addAction(task4);
-        iter.addAction(task5);
-        task6 = new WaitingTask(pistonPos, fun () {if (world.isAir(bedrockPos.asPos())){sleep(100); return true;} else {return false;}}); //remove piston
-        iter.addAction(task6);
-        task7 = new WaitingTask(pistonPos, fun () {return task6.isExecuted && world.isAir(pistonPos.asPos());});
-        iter.addAction(task7);
     }
     iter.prettyPos = pistonPos;
     return iter;
@@ -917,7 +940,7 @@ class Task {
                             break;
                         }
                     }
-                    else {
+                    else if (!this.immediate){
                         sleep(serverPing);
                     }
 
@@ -955,6 +978,19 @@ class Task {
     }
     fun copy(){
         return new Task(this.pos.copy(), this.shouldBreak, this.item, this.facing, this.optional + 1);
+    }
+    fun executeUnchecked(){
+        if (this.shouldBreak){
+            assertTool();
+            breakBlock(this.pos.asPos(), carefulBreakSneak);
+            this.isExecuted = true;
+        }
+        else {
+            placeDirectionBlock(this.pos.asPos(),this.itemString,this.facing, true);
+        }
+        messageHolder.sendDebugMessage(this.formattedSuccess());
+        //print(this.formattedSuccess());
+        return true;
     }
 }
 class FakeLookWaitingTask{
@@ -1125,7 +1161,6 @@ class WaitingTask {
                 messageHolder.sendDebugMessage(this.formattedSuccess());
                 return true;
             }
-
             result = placeDirectionBlock(this.pos.asPos(),this.itemString, this.facing, this.isImmediate());
             if (result){
                 this.isExecuted = true;
@@ -1160,7 +1195,8 @@ class WaitingTask {
                         break;
                     }
                     else {
-                        sleep(serverPing);
+                        if (!immediate)
+                            sleep(serverPing);
                     }
 
                 }
@@ -1174,25 +1210,80 @@ class WaitingTask {
         if (this.shouldBreak){
             return 'failed to break block at '+ this.pos.formatted();
         }
-        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate ' + this.facing;
+        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate, piston facing should be ' + this.facing;
     }
     fun formatted(){
         if (this.shouldBreak){
             return 'break block at '+ this.pos.formatted();
         }
-        return 'place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate ' + this.facing;
+        return 'place ' + this.itemString + ' at ' + this.pos.formatted() + ' with predicate, piston facing should be ' + this.facing;
     }
     fun formattedSuccess(){
         if (this.shouldBreak){
             return 'broke block at '+ this.pos.formatted() + ' at' + getMilliTime();
         }
-        return 'placed ' + this.itemString + ' at ' + this.pos.formatted()+ ' with predicate at ' + this.facing + getMilliTime();
+        return 'placed ' + this.itemString + ' at ' + this.pos.formatted()+ ' with predicate , piston facing should be ' + this.facing +" executed at :" + getMilliTime();
     }
     fun copy(){
         return new WaitingTask(this.pos.copy(), this.shouldBreak, this.item, this.facing,this.predicate, this.optional + 1);
     }
 }
 
+class LambdaTask {
+    // Task with predicate -> lambda
+    var pos;
+    var lambda;
+    var optional = 0;
+    var connectedTask = null;
+    var isExecuted = false;
+    var predicate = fun (){return true;};
+    var immediate = true;
+    var ignoreDistance = true;
+    LambdaTask(predicate, lambda){
+        this.predicate = predicate;
+        this.lambda = lambda;
+    }
+    fun isImmediate(){
+        return true;
+    }
+    fun setImmediate(bool){
+        this.immediate = bool;
+    }
+    fun hash(){
+        return 'lambdaTask' + this.predicate + this.lambda;
+    }
+    fun isDone(){
+    // null returns for nothing required
+        if(this.isExecuted){
+            return null;
+        }
+        return this;
+    }
+    fun isAvailable(){
+        //external access
+        return this.predicate();
+    }
+    fun process(){
+    // checks, returns if processed
+        if (this.isAvailable()){
+            this.lambda();
+            this.isExecuted = true;
+        }
+        return false;
+    }
+    fun finish(){
+        this.process();
+    }
+    fun formattedError(){
+        return 'lambdaTask';
+    }
+    fun formatted(){
+        return 'lambdaTask';
+    }
+    fun formattedSuccess(){
+        return 'lambdaTask';
+    }
+}
 
 //Piston Utils, only implements static methods.
 class PistonUtils{
@@ -1708,9 +1799,10 @@ class LeftOverProcessingTask {
     fun process(){
         this.clearKeys();
         foreach(t : this.tasks.getKeys()){
-            if (this.tasks.get(t) + 300 < getMilliTime()){
+            if (this.tasks.get(t) + 600 < getMilliTime()){
                 if (t.isNear(player, playerReach))
                 {
+                    assertTool();
                     messageHolder.sendDebugMessage(t.formatted());
                     breakBlock(t, false);
                 }
@@ -1890,7 +1982,6 @@ class SequencedTaskIterator {
         if(this.length <= 0 || this.length == this.pointer){
             return null;
         }
-        //messageHolder.sendMessageUnique(this.ListOfTask);
         tasks = this.ListOfTask.get(this.pointer);
         while (tasks.isExecuted && this.pointer < this.length){
             this.pointer ++;
@@ -2415,42 +2506,6 @@ new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer', rayTraceX],['y', 'Int
 new LinearCommand([['eBedrockBreaking'],  ['rayTrace']], breakingLookingAtTask).process();
 new LinearCommand([['eBedrockBreaking'],  ['rayTrace'], ['direction', 'Word', ['north', 'west', 'east', 'south', 'up', 'down']], ['headless', 'Boolean']], breakingLookingAtHeadlessTask).process();
 new LinearCommand([['eBedrockBreaking'],['Area'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakBedrockAreaTask).process();
-//setAreaPos1Task
-// Script
-//t = new Task(new PosWithFun(249,111,206), 'repeater', 'west');
-//t.finish();
-
-//t = new CyclicTaskGenerator(new PosWithFun(player.getLookingAtBlock()).up());
-//dir = Direction.EAST.rotateYClockwise();
-//messageHolder.sendMessage(dir.vector);
-//t.getDiagonal(Direction.EAST);
-//while (true){
-//    t.execute();
-//}
-
-//placeWallTorch(new PosWithFun(245,113,243), 'redstone_torch', Direction.EAST);
-
-//How to make waiting task:
-
-//task = pistonExtendRemovalTask(blockPos, facing);
-//task = pistonExtendRemovalTask(new PosWithFun(242,112,220), Direction.UP));
-
-//messageHolder.sendMessage(task.isAvailable());
-//taskIterator = new TaskIterator();
-//task = new WaitingTask(new PosWithFun(242,112,220), 'shroomlight', null, fun (){return world.isAir(new Pos(242,112,217));});
-//taskIterator.addAction(task);
-//chainedPistonTaskFull(blockPos, facing1, facing2, torchPos,torchPos2, torchFacing,torchFacing2, headless) //its better to have multiple torch pos for headless
-//taskIterator = chainedPistonTaskFull(new PosWithFun(242,112,220),UP, SOUTH, new PosWithFun(241,112,220), new PosWithFun(241,112,220), UP, UP, false);
-//taskHolder.add(taskIterator);
-i = 0;
-//torch, pis
-//recordPiston = PistonUtils.calculateBreakingPiston(world, new PosWithFun(player.getLookingAtBlock().getPos()));
-//if (recordPiston == null){
-//    throwRuntimeError('task was null');
-//}
-//messageHolder.sendMessage(recordPiston.formatted());
-//taskIterator = chainedPistonTaskRecord(recordPiston, true);
-//taskHolder.add(taskIterator);
 while (true){
     if (pause){
         sleep(50);
@@ -2467,7 +2522,6 @@ while (true){
     }
     foreach (tasks : taskHolder){
         result = tasks.execute();
-        //messageHolder.sendMessageUnique(tasks.formatted());
         if (sleepInterval > 0){
             sleep(sleepInterval);
         }
