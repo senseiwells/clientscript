@@ -1,0 +1,131 @@
+import * from Minecraft;
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+isCage = true;
+//static
+DimensionMap = {};
+renderRange = 12;
+
+logger = Set.of();
+fun printIfNotInSet(str){
+    if (logger.contains(str)){
+        return;
+    }
+    logger.add(str);
+    print(str);
+}
+class Chunk {
+    var x;
+    var z;
+    Chunk(x,z){
+        this.x = x;
+        this.z = z;
+    }
+    Chunk(posValue){
+        this.x = Math.floor(posValue.getX()/16);
+        this.z = Math.floor(posValue.getZ()/16);
+    }
+    fun hashCode(){
+        return this.x * 65546 +  this.z ;
+    }
+    fun format(){
+        return 'X : '+ this.x + 'Z : ' + this.z;
+    }
+    static fun hashCodeOf(posValue){
+        return posValue.getX() * 65546 +  posValue.getZ();
+    }
+}
+
+fun checkChunks(){
+    dim = player.getDimension();
+    if (DimensionMap.get(dim) == null){
+        DimensionMap.put(dim, Set.of());
+    }
+    refreshAndGetBlocks(dim, isCage);
+}
+
+fun refreshAndGetBlocks(dim, isCage){
+    world = client.getWorld();
+    pos = player.getPos();
+    fixedY = 0;
+    if (dim == 'overworld'){
+        fixedY = -60;
+    }
+    else if (dim.contains('nether')){
+        fixedY = -127;
+    }
+    else {
+        return;
+    }
+    offsetVal = 0;
+    if (isCage){
+        offsetVal = -1;
+    }
+    else {
+        offsetVal = -2;
+    }
+    pos = new Pos(pos.getX(), fixedY, pos.getZ());
+    positions = world.getPositions(pos.add(-renderRange * 16, 0, -renderRange* 16), pos.add(renderRange * 16, 0, renderRange* 16));
+    foreach ( position : positions){
+        chunkHash = Chunk.hashCodeOf(position);
+        if (DimensionMap.get(dim).contains(chunkHash)){
+            continue;
+        }
+        subPos = world.getPositions(position.add(-1, offsetVal, -1), position.add(1, 0, 1));
+        isBedrock = true;
+        shouldHash = false;
+        foreach (subpositions : subPos){
+            blockGet = world.getBlockAt(subpositions);
+            if (blockGet.getId() != 'air'){
+                shouldHash = true;
+            }
+            if (blockGet.getId() != 'bedrock'){
+                isBedrock = false;
+                break;
+            }
+        }
+        if (isBedrock){
+            printIfNotInSet("Found matching position at "+ dim + ' position : '+ position );
+            stop();
+            return;
+        }
+        if (shouldHash){
+            DimensionMap.get(dim).add(chunkHash);
+            printIfNotInSet('Cached chunk '+ new Chunk(position).format());
+        }
+    }
+}
+
+class BlockOf {
+    var x;
+    var y;
+    var z;
+    BlockOf(x,y,z){
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+    BlockOf(l){
+        this.x = l.get(0);
+        this.y = l.get(1);
+        this.z = l.get(2);
+    }
+    fun getChunk(){
+        return new Chunk(Math.floor(this.x / 16), Math.floor(this.z / 16));
+    }
+    fun hashCode(){
+        return Math.floor(this.x / 16) * 65546 +  Math.floor(this.z / 16) ;
+    }
+}
+
+
+
+while (true){
+    tt = getMilliTime();
+    checkChunks();
+    player.messageActionBar(getMilliTime() - tt);
+}
+hold();
+
+
