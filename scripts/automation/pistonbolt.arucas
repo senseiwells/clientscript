@@ -390,37 +390,24 @@ fun chainedPistonTaskRecord(record, headless){
     placingTorch = new WaitingTask(torchPos, 'redstone_torch', torchFacing, fun (){if (fakeTask == null){return pistonPlace.isExecuted;} else {if(pistonPlace.isExecuted && fakeTask.isExecuted){return true;} else {return false;} }});
     iter.addAction(placingTorch);
     placingTorch.setImmediate(true);
-    breakingTorch = new WaitingTask(torchPos, fun () {if (placingTorch.isExecuted){sleep(50); return true;} return false;}); //break torch
-    breakingTorch.setImmediate(true);
-    iter.addAction(breakingTorch);
-    torchRemovePredicate = fun(){return breakingTorch.isExecuted;};
-    placeTorchAgain = new WaitingTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate); //break -> place so it retracts, but will extend again.
-    placeTorchAgain.setImmediate(true);
-    iter.addAction(placeTorchAgain);
-    /*
-    removePiston = new WaitingTask(pistonPos, fun(){return breakingTorch.isExecuted;}); //remove piston
-    removePiston.setImmediate(true);
-    iter.addAction(removePiston);
-    placePistonAgain = new WaitingTask(pistonPos, pistonItem, facing2, fun(){return removePiston.isExecuted;}); //place piston should be executed in same tick
-    placePistonAgain.setImmediate(true);
-    iter.addAction(placePistonAgain);
-    */
     //break torch place torch break piston torch piston in same tick afap
     lambdaTTPP = fun () {
         while (Math.mod(getMilliTime(), 50) != 0){
-            sleep(1);
+
         }
         new Task(torchPos).executeUnchecked();
         new Task(torchPos,'redstone_torch', torchFacing).executeUnchecked();
         new Task(pistonPos).executeUnchecked();
         new Task(pistonPos, pistonItem, facing2).executeUnchecked();
+
+        sleep(350);
         if (world.getBlockAt(pistonPos.offset(facing1).asPos()).getId().contains('piston')|| world.getBlockAt(pistonPos.offset(facing1,2).asPos()).getId().contains('piston')){
             leftovers.addPos(pistonPos.offset(facing1));
             leftovers.addPos(pistonPos.offset(facing1, 2));
-            new Task(bedrockPos, 'redstone_torch', Direction.UP).executeUnchecked();
+            new Task(bedrockPos, 'slime_block', Direction.UP).executeUnchecked();
         }
     };
-    removeAndPlacePistonTask = new LambdaTask(fun(){return breakingTorch.isExecuted;},lambdaTTPP );
+    removeAndPlacePistonTask = new LambdaTask(fun(){if (placingTorch.isExecuted) {sleep(50); return true;}return false;},lambdaTTPP );
     iter.addAction(removeAndPlacePistonTask);
 
 
