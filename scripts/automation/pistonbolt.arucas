@@ -51,7 +51,6 @@ singleUsePosSet = Set.of();
 
 AreaPos1 = null;
 AreaPos2 = null;
-
 inventoryAccess = new InventoryUtil(player);
 //inventoryAccess.debug = true;
 // Functions
@@ -155,12 +154,11 @@ fun getDirectionId(dir) {
     return 0;
 }
 fun placeTorch(blockPos, itemString){
-	assertItem(itemString);
 	if (assertItem(itemString) || trustClient){
 	    x = blockPos.getX();
 	    y = blockPos.getY();
 	    z = blockPos.getZ();
-	    player.interactBlock(x,y,z,"up",x,y-1,z,false);
+	    player.interactBlock(x+0.5,y,z+0.5,"up",x,y-1,z,false);
 	    return true;
 	}
 	return false;
@@ -171,7 +169,6 @@ fun placeWallTorch(blockPos, itemString, torchFacing){
         messageHolder.sendMessage("position "+ clickPos.formatted() + ' does not handle wall torch.');
         return false;
     }
-	assertItem(itemString);
 	if (assertItem(itemString) || trustClient){
 	    clickVec = clickPos.getSidePos(torchFacing);
 	    player.interactBlock( clickVec.getX(), clickVec.getY(), clickVec.getZ(),torchFacing.getName(),clickPos.getX(),clickPos.getY(),clickPos.getZ(),false);
@@ -279,7 +276,6 @@ fun placeDirectionBlock(blockPos,itemString, direction, immediate){
 	    	fp = 0;
 	    }
 	}
-	assertItem(itemString);
 	if (assertItem(itemString) || trustClient){
 	    x = blockPos.getX();
 	    y = blockPos.getY();
@@ -391,15 +387,12 @@ fun chainedPistonTaskRecord(record, headless){
     iter.addAction(placingTorch);
     placingTorch.setImmediate(true);
     //break torch place torch break piston torch piston in same tick afap
-    lambdaTTPP = fun () {
-        while (Math.mod(getMilliTime(), 50) != 0){
-
-        }
+    lambdaTPPT = fun () {
         new Task(torchPos).executeUnchecked();
-        new Task(torchPos,'redstone_torch', torchFacing).executeUnchecked();
         new Task(pistonPos).executeUnchecked();
         new Task(pistonPos, pistonItem, facing2).executeUnchecked();
-
+        if (headless)
+            new Task(torchPos,'redstone_torch', torchFacing).executeUnchecked();
         sleep(350);
         if (world.getBlockAt(pistonPos.offset(facing1).asPos()).getId().contains('piston')|| world.getBlockAt(pistonPos.offset(facing1,2).asPos()).getId().contains('piston')){
             leftovers.addPos(pistonPos.offset(facing1));
@@ -407,7 +400,7 @@ fun chainedPistonTaskRecord(record, headless){
             new Task(bedrockPos, 'slime_block', Direction.UP).executeUnchecked();
         }
     };
-    removeAndPlacePistonTask = new LambdaTask(fun(){if (placingTorch.isExecuted) {sleep(50); return true;}return false;},lambdaTTPP );
+    removeAndPlacePistonTask = new LambdaTask(fun(){if (placingTorch.isExecuted) {sleep(50); return true;}return false;},lambdaTPPT );
     iter.addAction(removeAndPlacePistonTask);
 
 
