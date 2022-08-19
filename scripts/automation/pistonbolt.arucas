@@ -34,6 +34,7 @@ immediateInterval = 0;
 Mapping_Diagonal =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'sticky_piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
 Mapping_Straight =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
 Mapping_Straight_v2 = {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern', 8 : 'powered_rail'};
+CUSTOM_BLOCKS = {'Repeater' : 2, 'Powerable' : 4, 'Spawnproofing' : 5, 'Pushing' : 7};
 NORTH = Direction.NORTH;
 SOUTH = Direction.SOUTH;
 WEST = Direction.WEST;
@@ -52,7 +53,7 @@ singleUsePosSet = Set.of();
 AreaPos1 = null;
 AreaPos2 = null;
 inventoryAccess = new InventoryUtil(player);
-//inventoryAccess.debug = true;
+inventoryAccess.debug = true;
 // Functions
 fun assertHaste(){
     foreach ( effectname : player.getStatusEffects()){
@@ -77,7 +78,7 @@ fun checkItem(itemString){
 }
 // Swaps to pickaxe.
 fun swapToPickaxe(){
-    return inventoryAccess.swapToPickaxe();
+    return inventoryAccess.swapToTool("pickaxe");
 }
 fun checkPickaxe(){
     return inventoryAccess.checkPickaxe();
@@ -136,9 +137,9 @@ fun isBlockInstantBreakable(pos){
             return false;
          }
     }
-    messageHolder.sendDebugMessage(player.getBlockBreakingSpeed(b));
+    messageHolder.sendDebugMessage(player.getBlockBreakingSpeed(ItemStack.of(Material.NETHERITE_PICKAXE),b));
     messageHolder.sendDebugMessage(b.getHardness() * 30);
-    return player.getBlockBreakingSpeed(b) >=  b.getHardness() * 30;
+    return player.getBlockBreakingSpeed(ItemStack.of(Material.NETHERITE_PICKAXE),b) >=  b.getHardness() * 30;
 }
 
 //Simple carpet protocol
@@ -1125,7 +1126,7 @@ class WaitingTask {
     fun process(){
     // checks, returns if processed
         if (this.internalCanProcess()){
-            if(trustClient){
+            if(!trustClient){
                 this.internalAssertItem();
             }
             if (!this.immediate){
@@ -2201,6 +2202,16 @@ blockIntervalChangeTask = fun (newInterval){
         messageHolder.sendMessageUnchecked('New interval between blocks: '+ newInterval + 'ms');
     }
 };
+toggleSyncTask = fun (boolean){
+    if (boolean){
+        client.disableSync();
+        messageHolder.sendMessageUnchecked('Disabled sync from server, please turn on after use!');
+    }
+    else {
+        client.enableSync();
+        messageHolder.sendMessageUnchecked('Enabled sync from server!');
+    }
+};
 serverPingChangeTask = fun (newInterval){
     if(newInterval > 0){
         serverPing = newInterval;
@@ -2432,6 +2443,15 @@ toggleRailPoweringTask = fun (newBool){
     railPoweringTaskOff = !newBool;
     messageHolder.sendMessageUnchecked('Rail powering task is set to '+ (!railPoweringTaskOff));
 };
+
+setCustomItemTask = fun (itemType, itemName) {
+    item_idx = CUSTOM_BLOCKS.get(itemType);
+    Mapping_Diagonal.put(item_idx, itemName);
+    Mapping_Straight.put(item_idx, itemName);
+    Mapping_Straight_v2.put(item_idx, itemName);
+    messageHolder.sendMessageUnchecked('Item type : '+itemType + ' has changed to '+ itemName);
+};
+
 setRailPowerItem = fun (newItem){
     railPowerItem = newItem;
     messageHolder.sendMessageUnchecked('Rail power support item is set to ' + newItem);
@@ -2460,6 +2480,7 @@ new LinearCommand([['eBreak'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTr
 new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS], ['direction', 'Word', DefaultSuggester.DIRECTIONS]], fillDirectionTask).process();
 new LinearCommand([['eCommand'],['pause']], pauseTask).process();
 new LinearCommand([['eCommand'],['toggleMessage']], toggleMessageTask).process();
+new LinearCommand([['eCommand'],['disableSync'], ['options', 'Boolean']], toggleSyncTask).process();
 new LinearCommand([['eCommand'],['toggleActionBar']], toggleActionBarTask).process();
 new LinearCommand([['eRailPowering'],['bool', 'Boolean']], toggleRailPoweringTask).process();
 new LinearCommand([['eRailPowering'],['setItem'], ['newItem', 'Word', DefaultSuggester.BLOCKS]], setRailPowerItem).process();
@@ -2470,6 +2491,7 @@ new LinearCommand([['eCommand'],['toggleTrustClient']], trustClientTask).process
 new LinearCommand([['eCommand'], ['setInterval'], ['milliseconds', 'Integer']], intervalChangeTask).process();
 new LinearCommand([['eCommand'], ['setBlockPlacmentInterval'], ['milliseconds', 'Integer']], blockIntervalChangeTask).process();
 new LinearCommand([['eCommand'], ['expectedServerPing'], ['milliseconds', 'Integer']], serverPingChangeTask).process();
+new LinearCommand([['eCommand'], ['setBoltItem'], ['itemType', 'Word', CUSTOM_BLOCKS.getKeys()], ['itemName', 'Word', DefaultSuggester.BLOCKS]], setCustomItemTask).process();
 new LinearCommand([['eDiagonalPlace'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', DefaultSuggester.HORIZONTAL], ['itemString', 'Word', DefaultSuggester.BLOCKS]], diagonalUpTask).process();
 new LinearCommand([['eBridge'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word',  DefaultSuggester.DIRECTIONS], ['itemString', 'Word', DefaultSuggester.BLOCKS]], bridgeTask).process();
 new LinearCommand([['eDemiBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], demiBoltTask).process();

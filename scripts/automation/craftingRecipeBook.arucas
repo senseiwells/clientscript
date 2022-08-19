@@ -26,8 +26,9 @@ fun sendMessageUnique(messages){
 fun reset(){
     validCache = true; trial = 0;executed = 0;
 }
-new GameEvent('onClickRecipe', fun(newrecipe){if(recipe != newrecipe){reset();}recipe = newrecipe;sendMessageUnique("Recipe set to : "+ recipe.getFullId());}).register();
-new GameEvent('onPickUpItem', fun(stack){reset();}).register();
+
+new GameEvent('onClickRecipe', fun(newrecipe){if(recipe != newrecipe){reset();recipe = newrecipe;sendMessageUnique("Recipe set to : "+ recipe.getFullId());}}, true).register();
+new GameEvent('onPickUpItem', fun(stack){reset();}, true).register();
 fun hasAnyItems(){
     if(player.getCurrentScreen() == null || player.getCurrentScreen().getName() != 'Crafting'){
         return false;
@@ -44,17 +45,20 @@ maxThrowPerTick = 64;
 //ctrlQcraft -> then just do 20 or less
 tickActionLimitCount = 0;
 while(true){
-    if(recipe == null || !validCache || player.getCurrentScreen() == null || player.getCurrentScreen().getName() != 'Crafting' ){
+    if(recipe == null || !validCache || player.getCurrentScreen() == null || (player.getCurrentScreen().getName() != 'Crafting' && player.getCurrentScreen().getName() != 'Inventory') ){
         sleep(50);
         continue;
     }
     else {
         if(player.getItemForSlot(0).getCount() == 0 && validCache){
-            player.clickRecipe(recipe, true);
+            for(i = 0; i < maxThrowPerTick; i++){
+                player.clickRecipe(recipe, true);
+                player.clickSlot(0, 'right', 'throw');
+            }
             sleep(50);
             trial++;
             tickActionLimitCount = 0;
-            if(trial > 3 && !hasAnyItems()){
+            if(trial > 12 && !hasAnyItems()){
                 validCache = false;
                 player.message("Tried crafting item "+ recipe.getOutput().getFullId()+ " for "+executed + " times, pausing");
                 executed = 0;
