@@ -22,7 +22,7 @@ carefulBreakSneak = false;
 messageHolder = new MessageHolder();
 delayedHolder = new BedrockBreakingTaskSeparator();
 leftovers = new LeftOverProcessingTask();
-messageHolder.debugFlag = true;
+messageHolder.debugFlag = false;
 pistonItem = 'piston';
 spawnChecker = new SpawnConditionCheck(world);
 taskInterval = 15; //10ms interval
@@ -1520,7 +1520,6 @@ class CyclicTaskGenerator {
         awaitingTask = this.pollSafely();
         if (awaitingTask != null){
             awaitingTask.finish();
-            return true;
         }
         return false;
     }
@@ -1741,7 +1740,6 @@ class TaskIterator {
         awaitingTask = this.pollSafely();
         if (awaitingTask != null){
             awaitingTask.finish();
-            return true;
         }
         return false;
     }
@@ -1992,8 +1990,6 @@ class SequencedTaskIterator {
             messageHolder.sendDebugMessage('execute ' + awaitingTask.formatted());
             awaitingTask.finish();
             messageHolder.sendDebugMessage('executed ' + awaitingTask.formatted()+'\n');
-            return true;
-
         }
         return false;
     }
@@ -2524,6 +2520,9 @@ while (true){
     }
     foreach (tasks : taskHolder){
         result = tasks.execute();
+        if (result){
+            taskHolder.remove(tasks);
+        }
         if (sleepInterval > 0){
             sleep(sleepInterval);
         }
