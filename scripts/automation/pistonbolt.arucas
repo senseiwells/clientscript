@@ -53,7 +53,7 @@ singleUsePosSet = Set.of();
 AreaPos1 = null;
 AreaPos2 = null;
 inventoryAccess = new InventoryUtil(player);
-inventoryAccess.debug = true;
+inventoryAccess.debug = false;
 // Functions
 fun assertHaste(){
     foreach ( effectname : player.getStatusEffects()){

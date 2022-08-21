@@ -4,7 +4,7 @@ player = client.getPlayer();
 world = client.getWorld();
 
 new GameEvent('onDimensionChange', fun (){world = client.getWorld(); player = client.getPlayer();}).register();
-isCage = true;
+isCage = false;
 //static
 DimensionMap = {'overworld' : Set.of(), 'the_nether' :  Set.of()};
 renderRange = 12;
@@ -21,8 +21,8 @@ class Chunk {
     static fun formatOf(posValue) : String{
         return 'X : '+ Math.floor(posValue.getX()/16) + 'Z : ' + Math.floor(posValue.getZ()/16);
     }
-    static fun hashCodeOf(posValue) : Number{
-        return Math.floor(posValue.getX() / 16) * 65536 + Math.floor(posValue.getZ()/16) ;
+    static fun hashCodeOf(posValue) {
+        return (Math.floor(posValue.getX() / 16) * 65536 + Math.floor(posValue.getZ()/16)).toString() ;
     }
 }
 
@@ -99,7 +99,7 @@ fun refreshAndGetBlocks(dim, isCage){
         result = testIterator(position, isCage);
         if (Math.mod(position.getX(), 16) == 15 && Math.mod(position.getZ(), 16) == 15 &&result.get(0)){
             DimensionMap.get(dim).add(chunkHash);
-            printIfNotInSet('Cached chunk '+ Chunk.formatOf(position) + ' as hash ' + chunkHash);
+            printIfNotInSet('Cached c/'+ Chunk.formatOf(position));
         }
         if (result.get(1)){
             printIfNotInSet("Found matching position at "+ dim + ' position : '+ position );
@@ -110,10 +110,16 @@ fun refreshAndGetBlocks(dim, isCage){
 }
 
 //print(testIterator(new Pos(9402,-60,7498), true));
-
+saved = false;
 while (true){
     tt = getMilliTime();
     checkChunks();
+    if (!saved &&len(DimensionMap.get('overworld')) > 5000){
+        saved = true;
+        str = DimensionMap.get('overworld').toString();
+        file= new File('setDump.txt');
+        file.write(str);
+    }
     player.messageActionBar("Overworld hash size : " + len(DimensionMap.get('overworld')) + "Nether hash size : " + len(DimensionMap.get('the_nether')) + "logger size : " + len(logger) + ' '+(getMilliTime() - tt) + 'ms took');
 }
 hold();

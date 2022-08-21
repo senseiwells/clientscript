@@ -30,7 +30,7 @@ center = player.getPos();
 fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
     retVal = [];
     centerAs = player.getPos();
-    if(maxAround == 0){
+    if(maxAround > 0){
         centerAs = center;
     }
     else {
@@ -91,9 +91,16 @@ fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
 }
 fun iterateFunDirect(xreach,yreach, zreach, function, arguments, apply){
     retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
+        centerAs = player.getPos();
+    if(maxAround > 0){
+        centerAs = center;
+    }
+    else {
+        centerAs = player.getPos();
+    }
+    sx = centerAs.getX().round();
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
     streamInit = BlockPosIterate(new PosWithFun(sx-xreach, sy-yreach, sz-zreach).asJavaPos(), new PosWithFun(sx+xreach, sy+yreach, sz+zreach).asJavaPos()).spliterator();
     return StreamSupportStream(streamInit, Java.valueOf(false)).
                 filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
@@ -104,9 +111,16 @@ fun iterateFunDirect(xreach,yreach, zreach, function, arguments, apply){
 }
 fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
     retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
+        centerAs = player.getPos();
+    if(maxAround > 0){
+        centerAs = center;
+    }
+    else {
+        centerAs = player.getPos();
+    }
+    sx = centerAs.getX().round();
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
     lambda  = fun (){
     streamInit = BlockPosIterate(new PosWithFun(sx-xreach, sy-yreach, sz-zreach).asJavaPos(), new PosWithFun(sx+xreach, sy+yreach, sz+zreach).asJavaPos()).spliterator();
     return StreamSupportStream(streamInit, Java.valueOf(false)).
