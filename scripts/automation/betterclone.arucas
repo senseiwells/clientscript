@@ -12,21 +12,21 @@ rayTraceX = fun (args...){
     if (block.getId().contains('air')){
         return [Math.round(player.getPos().getX())];
     }
-    return [player.getLookingAtBlock().getX()];
+    return [player.getLookingAtBlock().getPos().getX()];
 };
 rayTraceY = fun (args...){
     block = player.getLookingAtBlock();
     if (block.getId().contains('air')){
         return [Math.round(player.getPos().getY())];
     }
-    return [player.getLookingAtBlock().getY()];
+    return [player.getLookingAtBlock().getPos().getY()];
 };
 rayTraceZ = fun (args...){
     block = player.getLookingAtBlock();
     if (block.getId().contains('air')){
         return [Math.round(player.getPos().getZ())];
     }
-    return [player.getLookingAtBlock().getZ()];
+    return [player.getLookingAtBlock().getPos().getZ()];
 };
 
 betterCloneNormal = fun(ax, ay, az, ex, ey, ez, tx, ty, tz, repeatTimes, direction){

@@ -10,14 +10,22 @@ player = client.getPlayer();
 world = client.getWorld();
 clientJava = Java.valueOf(client);
 sleepInterval = 5;
-reachDistance = 4.5;
+reachDistance = 199;
 fun isObsidian(pos){
     p = PosWithFun.getPos(pos);
     return world.getBlockAt(p).getId() == 'obsidian';
 }
+fun isPortal(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).getId() == 'nether_portal';
+}
 fun isSlime(pos){
     p = PosWithFun.getPos(pos);
     return world.getBlockAt(p).getId() == 'slime_block' ||  !world.getBlockAt(p).isReplaceable();
+}
+fun isSlimeStrict(pos){
+    p = PosWithFun.getPos(pos);
+    return world.getBlockAt(p).getId() == 'slime_block';
 }
 fun isAir(pos){
     p = PosWithFun.getPos(pos);
@@ -30,6 +38,9 @@ fun isReplaceable(pos){
 // pick axis, expand,
 fun getSquareForDirection(pos, direction){
     i = 1;
+    if (!isObsidian(pos.up()) || !isObsidian(pos.up(2))){
+        return null;
+    }
     while (i <24){
         if (isObsidian(pos.offset(direction, i))){
             if (isObsidian(pos.offset(direction, i).up())){
@@ -130,6 +141,9 @@ class InteractUtils {
             if (world.getBlockAt(position).getId() == blockName){
                 return;
             }
+            if (!world.getBlockAt(position).isReplaceable()){
+                return;
+            }
             swapToItem(blockName);
             if (useOffHand){
                 player.interactBlock(position, 'up', 'off_hand');
@@ -150,7 +164,7 @@ class InteractUtils {
             if (world.getBlockAt(position).getId() == 'nether_portal' || world.getBlockAt(position.add(0,-1,0)).getId() != 'obsidian'){
                 return;
             }
-            swapToItem('flint_and_steel');
+            swapToItem('fire_charge');
             if (useOffHand){
                 player.interactBlock(position, 'up', 'off_hand');
             }
@@ -215,25 +229,43 @@ fun doForRect(startPos){
     }
     portalPos = startPos.offset(dir).up();
     portalRect = new Rect(portalPos, rect1, dir);
+    if (portalRect.predicates(isPortal)){
+        return null;
+    }
     slimeRect1 = portalRect.move(dir.rotateYClockwise());
     slimeRect2 = portalRect.move(dir.rotateYCounterclockwise());
-    while (!slimeRect1.predicates(isSlime)){
-        slimeRect1.apply(placeSlime);
+    foreach ( i : range(3)){
+        while (!slimeRect1.predicates(isSlime)){
+            slimeRect1.apply(placeSlime);
+        }
+        sleep(100);
     }
-    while (!portalRect.predicates(isSlime)){
-        portalRect.apply(placeSlime);
+
+    foreach ( i : range(3)){
+        while (!portalRect.predicates(isSlime)){
+            portalRect.apply(placeSlime);
+        }
+        sleep(100);
     }
-    while (!slimeRect2.predicates(isSlime)){
-        slimeRect2.apply(placeSlime);
+
+    foreach ( i : range(3)){
+        while (!slimeRect2.predicates(isSlime)){
+            slimeRect2.apply(placeSlime);
+        }
+        sleep(100);
     }
-    while (!portalRect.predicates(isAir)){
-        portalRect.apply(removeSlime);
+
+    foreach ( i : range(3)){
+        while (portalRect.predicates(isSlimeStrict)){
+            portalRect.apply(removeSlime);
+        }
+        sleep(100);
     }
     portalRect.apply(litPortal);
-    while (!slimeRect1.predicates(isAir)){
+    while (slimeRect1.predicates(isSlimeStrict)){
         slimeRect1.apply(removeSlime);
     }
-    while (!slimeRect2.predicates(isAir)){
+    while (slimeRect2.predicates(isSlimeStrict)){
         slimeRect2.apply(removeSlime);
     }
 }
