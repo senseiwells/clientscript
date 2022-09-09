@@ -85,7 +85,6 @@ fun placeBeacon(block) {
     player.look(0,0);
     walk(2);
     sleep(1000);
-    print("starting placing layers");
     // Main Script - Places each layer of the beacon
     for (layer = 4; layer > 0; layer--) {
         player.jump();
