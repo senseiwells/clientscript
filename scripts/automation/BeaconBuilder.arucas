@@ -47,16 +47,19 @@ fun placeBeacon(block) {
 
     player.setSelectedSlot(0);
     if (player.getHeldItem().getMaterial() != blockMaterial) {
-        player.swapSlots(player.getSlotFor(blockItem), player.getCurrentSlot() + 36);
+        player.swapSlots(player.getSlotFor(blockItem), 36);
         sleep(50);
     }
 
     // Edge case this is possible
+    // Not any more i don't think
+    /*
     if (player.getHeldItem().getMaterial() != blockMaterial) {
         print("Weren't holding the correct material, try again!");
         running = false;
         return;
     }
+    */
 
     x = Math.floor(player.getX());
     y = Math.floor(player.getY());
@@ -82,7 +85,6 @@ fun placeBeacon(block) {
     player.look(0,0);
     walk(2);
     sleep(1000);
-
     // Main Script - Places each layer of the beacon
     for (layer = 4; layer > 0; layer--) {
         player.jump();
@@ -91,7 +93,7 @@ fun placeBeacon(block) {
         for (x_offset = -layer; x_offset <= layer; x_offset++) {
             for (z_offset = -layer; z_offset <= layer; z_offset++) {
                 blockPos = new Pos(x + x_offset, y + y_offset, z + z_offset);
-                if (world.getBlockAt(blockPos).getMaterial() == Material.AIR){
+                if (world.getBlockAt(blockPos).getId() == "air"){
                     if (player.getHeldItem().getCount() < 3 && player.getGamemode() != "creative"){
                         nextSlot = player.getSlotFor(blockItem);
                         if (nextSlot == null) {
