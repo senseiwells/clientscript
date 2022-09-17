@@ -378,7 +378,7 @@ while (true) {
     if (sneakWhenBreak) player.setSneaking(false);
     placeBlock();
     sleep(100);
-    while (player.getCurrentScreen() == null || !player.getCurrentScreen().instanceOf("MerchantScreen") ){
+    while (player.getCurrentScreen() == null || !player.getCurrentScreen().instanceOf(MerchantScreen.type) ){
     allEntities = client.getWorld().getAllEntities();
     foreach (entity : allEntities) {
         if (entity.getId() == "villager" && player.getSquaredDistanceTo(entity) < 5) {
@@ -387,10 +387,15 @@ while (true) {
     }
     sleep(300);}
     screen = player.getCurrentScreen();
-    index = screen.getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
-    if (index == null) {
+    index = null;
+    try {
+        index = screen.getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
+    }
+    catch (e) {
+        index = -1;
+    }
+    if (index == null || index == -1) {
         player.closeScreen();
-
         if (sneakWhenBreak) player.setSneaking(true);
         sleep(200);
         swapToaxe();
@@ -407,7 +412,9 @@ while (true) {
         continue;
     }
     else {
-        sleep(100);
+        if (!index.instanceOf(Number.type)){
+            throw new Error("Index type was not Number");
+        }
         item = screen.getTradeItemForIndex(index);
         value = screen.getPriceForIndex(index);
         enchant = item.getEnchantments();
@@ -429,11 +436,16 @@ while (true) {
                 auto = enchantNames;
                 client.playSound("entity.lightning_bolt.thunder", 1, 1);
                 if (fixTrade){
-                    while(!screen.isTradeSelected()){
-                        screen.selectTrade(index);
-                        sleep(100);
+                    try {
+                        while(!screen.isTradeSelected()){
+                            screen.selectTrade(index);
+                            sleep(100);
+                        }
+                        screen.tradeSelectedAndThrow();
                     }
-                    screen.tradeSelectedAndThrow();
+                    catch (exitTradeScreenError){
+                        //pass
+                    }
                 }
                 break;
             } else {
