@@ -9,7 +9,7 @@ player = client.getPlayer();
 world = client.getWorld();
 
 singleRemovalBlock = 'cobblestone';
-playerReach = 16;
+playerReach = 8;
 //copy paste of pistonbolt script
 executedTimes = 0;
 sleepInterval = 50;
