@@ -10,7 +10,7 @@ player = client.getPlayer();
 world = client.getWorld();
 clientJava = Java.valueOf(client);
 sleepInterval = 5;
-reachDistance = 199;
+reachDistance = 8;
 fun isObsidian(pos){
     p = PosWithFun.getPos(pos);
     return world.getBlockAt(p).getId() == 'obsidian';
