@@ -1,0 +1,96 @@
+import * from Minecraft;
+
+import LinearCommand from minecraft.CommandUtils;
+import * from minecraft.PosUtils;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+
+rayTraceX = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getX())];
+    }
+    return [player.getLookingAtBlock().getPos().getX()];
+};
+rayTraceY = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getY())];
+    }
+    return [player.getLookingAtBlock().getPos().getY()];
+};
+rayTraceZ = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getZ())];
+    }
+    return [player.getLookingAtBlock().getPos().getZ()];
+};
+
+betterCloneNormal = fun(ax, ay, az, ex, ey, ez, tx, ty, tz, repeatTimes, direction){
+    betterCloneOption2(ax, ay, az, ex, ey, ez, tx, ty, tz, 'replace', 'normal', repeatTimes, direction);
+};
+betterCloneNormalNoMove = fun(ax, ay, az, ex, ey, ez, repeatTimes, direction){
+    tx = Math.min(ax, ex);
+    ty = Math.min(ay, ey);
+    tz = Math.min(az, ez);
+    betterCloneOption2(ax, ay, az, ex, ey, ez, tx, ty, tz, 'replace', 'normal', repeatTimes, direction);
+};
+betterCloneOption1 = fun(ax, ay, az, ex, ey, ez, tx, ty, tz, option, repeatTimes, direction){
+    betterCloneOption2(ax, ay, az, ex, ey, ez, tx, ty, tz, 'replace', option, repeatTimes, direction);
+};
+betterCloneOption2 = fun(ax, ay, az, ex, ey, ez, tx, ty, tz, option, optionName, repeatTimes, direction){
+    if (!direction.isValid()){
+        return;
+    }
+    basePos = new Pos(ax, ay, az);
+    endPos = new Pos(ex, ey, ez);
+    targetPos = new Pos(tx, ty, tz);
+    sx = Math.abs(ax - ex) + 1;
+    sy = Math.abs(ay - ey) + 1;
+    sz = Math.abs(az - ez) + 1;
+    axis = direction.axis;
+    multVal = 1;
+    for (i = 0; i < repeatTimes; i++){
+        targetPosModified = null;
+        if (axis == Axis.Y){
+            if (direction.vector.getY() < 0){
+                multVal = -1;
+            }
+            targetPosModified = targetPos.add(0, sy * i * multVal, 0);
+        }
+        else if (axis == Axis.X){
+            if (direction.vector.getX() < 0){
+                multVal = -1;
+            }
+            targetPosModified = targetPos.add(sx * i * multVal, 0, 0);
+        }
+        else if (axis == Axis.Z){
+            if (direction.vector.getZ() < 0){
+                multVal = -1;
+            }
+            targetPosModified = targetPos.add(0, 0, sz * i * multVal);
+        }
+        targetX = targetPosModified.getX();
+        targetY = targetPosModified.getY();
+        targetZ = targetPosModified.getZ();
+        player.say('/clone %s %s %s %s %s %s %s %s %s %s %s'.format(ax, ay, az, ex, ey, ez, targetX, targetY, targetZ, option, optionName));
+    }
+};
+new LinearCommand([['cClone'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]
+    ,['tx', 'Integer', rayTraceX],['ty', 'Integer', rayTraceY],['tz', 'Integer', rayTraceZ], ['option', 'Word', ['replace']],
+     ['option2','Word', ['force', 'move', 'normal']], ['repeat'], ['repeatTimes', 'Integer'], ['direction', 'enum', Direction.type]
+], betterCloneOption2).process();
+new LinearCommand([['cClone'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]
+    ,['tx', 'Integer', rayTraceX],['ty', 'Integer', rayTraceY],['tz', 'Integer', rayTraceZ], ['option', 'Word', ['force', 'move', 'normal']],
+      ['repeat'], ['repeatTimes', 'Integer'], ['direction', 'enum', Direction.type]
+], betterCloneOption1).process();
+new LinearCommand([['cClone'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]
+    ,['tx', 'Integer', rayTraceX],['ty', 'Integer', rayTraceY],['tz', 'Integer', rayTraceZ], ['repeat'], ['repeatTimes', 'Integer'], ['direction', 'enum', Direction.type]
+], betterCloneNormal).process();
+new LinearCommand([['cClone'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]
+    ,['repeat'], ['repeatTimes', 'Integer'], ['direction', 'enum', Direction.type]
+], betterCloneNormalNoMove).process();
+hold();
