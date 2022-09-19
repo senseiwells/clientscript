@@ -1624,9 +1624,6 @@ class SpawnConditionCheck{
 }
 
 client = MinecraftClient.getClient();
-clientJava = Java.valueOf(client);
-
-jWorld = clientJava.world;
 player = client.getPlayer();
 world = client.getWorld();
 
