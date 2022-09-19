@@ -1,0 +1,346 @@
+import * from Minecraft;
+import Java from util.Internal;
+import * from minecraft.CommandUtils;
+import * from minecraft.InventoryUtils;
+import * from util.Predicates;
+client = MinecraftClient.getClient();
+clientJava = Java.valueOf(client);
+player = client.getPlayer();
+world = client.getWorld();
+
+singleRemovalBlock = 'cobblestone';
+playerReach = 8;
+//copy paste of pistonbolt script
+executedTimes = 0;
+sleepInterval = 50;
+useCobble = false;
+useOffHand = false;
+iceNuker = false;
+lavaSponge = false;
+waterSponge = false;
+startPos = null;
+endPos = null;
+
+inventoryAccess = new InventoryUtil(player);
+inventoryAccess.preserveDurability = true;
+fun swapToItem(itemString){
+    return inventoryAccess.swapToItem(itemString);
+}
+fun checkItem(itemString){
+    return inventoryAccess.checkItem(itemString);
+}
+// Swaps to pickaxe.
+fun swapToPickaxe(){
+    return inventoryAccess.swapToPickaxe();
+}
+fun checkPickaxe(){
+    return inventoryAccess.checkPickaxe();
+}
+
+fun isWithinRange(checkPos, p1, p2){
+    mx = Math.min(p1.getX(), p2.getX());
+    my = Math.min(p1.getY(), p2.getY());
+    mz = Math.min(p1.getZ(), p2.getZ());
+    ex = Math.max(p1.getX(), p2.getX());
+    ey = Math.max(p1.getY(), p2.getY());
+    ez = Math.max(p1.getZ(), p2.getZ());
+    return mx <= checkPos.getX() && ex >= checkPos.getX() && my <= checkPos.getY() && ey >= checkPos.getY() && mz <= checkPos.getZ() && ez >= checkPos.getZ() ;
+}
+
+class ScheduledRenderPos {
+    static var holdingSet = Set.of();
+    static var previousChecked = getMilliTime();
+    static fun addPos(pos : Pos, color : Number){
+        ScheduledRenderPos.holdingSet.add([ScheduledRenderPos.getRenderObject(pos, color), getMilliTime() + 3000]);
+    }
+    static fun check(){
+        ctime = getMilliTime();
+        if (ctime < ScheduledRenderPos.previousChecked + 1000){
+            return;
+        }
+        foreach (obj : ScheduledRenderPos.holdingSet){
+            t = obj.get(1);
+            if (t == null){
+                continue;
+            }
+            if (ctime > t){
+                obj.get(0).stopRendering();
+                ScheduledRenderPos.holdingSet.remove(obj);
+            }
+        }
+    }
+    static fun getRenderObject(pos : Pos, color : Number){
+        box = new BoxShape(pos);
+        box.setColour(color);
+        box.setOpacity(80);
+        box.setRenderThroughBlocks(true);
+        box.render();
+        return box;
+    }
+}
+class PredicateUtils{
+    static fun mergedPredicate(predicates...){
+        return fun (value){
+            foreach(pred : predicates){
+                if(!pred(value)){
+                    return false;
+                }
+            }
+            return true;
+        };
+    }
+}
+class NukerHax {
+    static fun predicateBlock(blockName){
+        return fun (pos){ block = world.getBlockAt(pos);return block.getId() == blockName;};
+    }
+    static fun predicateBlockProperty(blockName, propertyMap){
+        return fun (pos){ block = world.getBlockAt(pos);
+            if(block.getId() == blockName){
+                blockProp = block.getBlockProperties();
+                foreach ( prop : propertyMap.getKeys()){
+                    if (blockProp.get(prop) != propertyMap.get(prop)){
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
+        };
+    }
+    static fun predicateReach(){
+        return fun (pos){ reachDistance = playerReach; px,py,pz = pos.toList(); ax, ay, az = player.getPos().toList(); return (px-ax)^2 + (py-ay)^2 + (pz-az)^2 <= reachDistance * reachDistance;};
+    }
+    static fun toolSwitch(){
+        swapToPickaxe();
+    }
+    static fun iterate(predicate, action){
+        foreach (pos : world.getPositions(player.getPos().add(new Pos(-playerReach, -playerReach, -playerReach)), player.getPos().add(new Pos(playerReach, playerReach, playerReach)))){
+            if(predicate(pos)){
+                action(pos);
+            }
+            executedTimes++;
+        }
+    }
+    static fun iterateOverArea(pos1, pos2, predicate, action){
+        percentage = 0;
+        sp, ep = [player.getPos().add(new Pos(-playerReach, -playerReach, -playerReach)), player.getPos().add(new Pos(playerReach, playerReach, playerReach))];
+        res = ep.subtract(sp);
+        amount = (res.getX() + 1) * (res.getY() + 1) * (res.getZ() + 1);
+        scanned = 0;
+        foreach (pos : world.getPositions(player.getPos().add(new Pos(-playerReach, -playerReach, -playerReach)), player.getPos().add(new Pos(playerReach, playerReach, playerReach)))){
+            scanned++;
+            //Thread.runThreaded("render",fun (){ScheduledRenderPos.check();});
+            ratio = Math.floor(scanned / amount * 100);
+            if (percentage != ratio){
+                percentage = ratio;
+                player.messageActionBar("scanning percentage : "+ percentage + '% for total blocks ' + amount);
+            }
+            if (pos.getY() < -63 || !isWithinRange(pos, pos1, pos2)){
+                continue;
+            }
+
+            if(predicate(pos)){
+                //player.messageActionBar("found matching block at : "+ pos);
+                //Thread.runThreaded("render", fun () {ScheduledRenderPos.addPos(pos, 16728128);});
+                action(pos);
+            }
+            else {
+                //ScheduledRenderPos.addPos(pos, 16777215);
+            }
+
+            executedTimes++;
+        }
+    }
+    static fun defaultAttack(){
+        return fun(position){player.attackBlock(position, 'up');};
+    }
+    static fun defaultInteractBlockWith(blockName){
+        return fun(position){
+            swapToItem(blockName);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+        };
+    }
+    static fun defaultInteractBlockWithSet(blockName, set){
+        return fun(position){
+        if(set.contains(position)){return;}
+            swapToItem(blockName);
+            set.add(position);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+        };
+    }
+    static fun defaultInteractBlockWithSetSupplier(blockGetter, set){
+        return fun(position){
+        if(set.contains(position.toString())){return;}
+            blockName = blockGetter();
+            swapToItem(blockName);
+            set.add(position.toString());
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+        };
+    }
+    static fun defaultInteractBlockThenSleep(blockName, set){
+        return fun(position){
+        if(set.contains(position)){return;}
+            swapToItem(blockName);
+            set.add(position);
+            if (useOffHand){
+                player.interactBlock(position, 'up', 'off_hand');
+            }
+            else {
+                player.interactBlock(position, 'up');
+            }
+            sleep(sleepInterval);
+        };
+    }
+}
+predicateIce = NukerHax.predicateBlock('ice');
+predicateLava = NukerHax.predicateBlockProperty('lava', {'level' : 0});
+predicateWater = NukerHax.predicateBlockProperty('water', {'level' : 0});
+predicateWaterlogged = fun (position){
+    block = world.getBlockAt(position);
+    if (block.getId().contains('seagrass') || block.getId().contains('bubble_column')){
+        return true;
+    }
+    return block.isReplaceable() && block.getBlockProperties().get('waterlogged') == true;
+};
+predB = NukerHax.predicateReach();
+breakAction = NukerHax.defaultAttack();
+predicateIceMerged = PredicateUtils.mergedPredicate(predicateIce, predB);
+waterRemovalSpongeAction = NukerHax.defaultInteractBlockThenSleep('sponge', Set.of());
+blockGetter = fun () {return singleRemovalBlock;};
+waterRemovalCobbleAction = NukerHax.defaultInteractBlockWithSetSupplier(blockGetter, Set.of());
+lavaSpongeAction = NukerHax.defaultInteractBlockWithSetSupplier(blockGetter, Set.of());
+predicateLavaMerged = PredicateUtils.mergedPredicate(predicateLava, predB);
+predicateWaterMerged = PredicateUtils.mergedPredicate(Predicate.or(predicateWater, predicateWaterlogged), predB);
+predicateFluidMerged = Predicate.or(predicateWaterMerged, predicateLavaMerged);
+fun doActions(){
+
+    if(iceNuker){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        NukerHax.iterate(predicateIceMerged, breakAction);
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
+    if(lavaSponge){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        NukerHax.iterate(predicateLavaMerged, lavaSpongeAction);
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
+
+    if(waterSponge){
+        sleep(5);
+        executedTimes = 0;
+        time = getMilliTime();
+        if(useCobble){
+            NukerHax.iterate(predicateWaterMerged, waterRemovalCobbleAction);
+        }
+        else {
+            NukerHax.iterate(predicateWaterMerged, waterRemovalSpongeAction);
+        }
+        if(executedTimes == 0){
+            executedTimes++;
+        }
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
+
+    if (startPos != null && endPos != null){
+        executedTimes = 0;
+        time = getMilliTime();
+        NukerHax.iterateOverArea(startPos, endPos, predicateFluidMerged, lavaSpongeAction);
+
+        player.messageActionBar('We can iterate '+ Math.ceil(executedTimes / (getMilliTime()-time) )  + 'blocks per ms');
+    }
+}
+rayTraceX = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getX())];
+    }
+    return [player.getLookingAtBlock().getX()];
+};
+rayTraceY = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getY())];
+    }
+    return [player.getLookingAtBlock().getY()];
+};
+rayTraceZ = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getZ())];
+    }
+    return [player.getLookingAtBlock().getZ()];
+};
+
+setSingleRemovalBlock = fun (newBlock) {
+    singleRemovalBlock = newBlock;
+    player.message('Set item to ' + singleRemovalBlock);
+};
+
+toggleUseHand = fun (hand){
+    if (hand == 'main'){
+        useOffHand = false;
+    }
+    else {
+        useOffHand = true;
+    }
+    player.message('Set offhand use to '+ useOffHand);
+};
+setReachTask = fun (newreach){
+    playerReach = newreach;
+    player.message('Set reach to '+ playerReach);
+};
+lavaSpongeOnOffTask = fun(){lavaSponge = !lavaSponge;};
+waterSpongeOnOffTask = fun(){waterSponge = !waterSponge;};
+iceNukerOnOffTask = fun(){iceNuker = !iceNuker;};
+
+fillTask = fun ( x, y, z, ex, ey, ez) {
+    startPos = new Pos(x,y,z);
+    endPos = new Pos(ex, ey, ez);
+};
+
+new LinearCommand([['nuker'], ['setItem'], ['itemName', 'Word', DefaultSuggester.BLOCKS]], setSingleRemovalBlock).process();
+new LinearCommand([['lavaSponge']], lavaSpongeOnOffTask).process();
+new LinearCommand([['waterSponge']], waterSpongeOnOffTask).process();
+new LinearCommand([['iceNuker']], iceNukerOnOffTask).process();
+new LinearCommand([['nuker'], ['setReach'], ['reachDistance', 'Integer']], setReachTask).process();
+new LinearCommand([['removeLavaArea'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], fillTask).process();
+fun breakBlock(pos){
+    //we need library for this?
+    player.updateBreakingBlock(pos);
+    while (!world.getBlockAt(pos).isReplaceable()){
+        player.updateBreakingBlock(pos);
+        sleep(50);
+    }
+}
+while (true){
+    doActions();
+    //sleep(5);
+}
+//print(world.getBlockAt(new Pos(-34, -55, 1442)));
+//print(predicateLavaMerged(new Pos(-34, -55, 1442)));
