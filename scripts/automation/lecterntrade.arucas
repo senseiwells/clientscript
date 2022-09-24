@@ -24,13 +24,7 @@ fun showMsg(msg, time) {
     player.messageActionBar(msg);
     sleep(time);
 }
-fun showhelp() {
-    player.message('/tradeSetup command pauses / resumes actions');
-    player.message('/tradeSetup <enchantment> <wantedlevel> <price> to add enchantment searches');
-    player.message('Pause and add enchantments you want then resume to search multiple');
-    player.message('/tradeSetup papermode to toggle paper-compatible setup');
-    player.message('/tradeSetup add fortune-1-31-looting-3-16');
-}
+
 fun getIterator(start, end, num){
     ii = 0;
     maxlen = 1000;
@@ -350,6 +344,21 @@ allowFixingTradeTask = fun (bool){
     player.message("Fixing trade after done is set to : "+ bool);
     fixTrade = bool;
 };
+fun showhelp() {
+    player.message('/tradeSetup command pauses / resumes actions');
+    player.message('/tradeSetup <enchantment> <wantedlevel> <price> to add enchantment searches');
+    player.message('Pause and add enchantments you want then resume to search multiple');
+    player.message('/tradeSetup papermode to toggle paper-compatible setup');
+    player.message('/tradeSetup add fortune-1-31-looting-3-16');
+    player.message('/tradeSetup fixTrade <boolean> -> toggles fixing trade after finding one');
+    player.message('/tradeSetup togglePause -> toggles running state');
+    player.message('/tradeSetup save -> saves current searching list');
+    player.message('/tradeSetup refresh -> finds another lectern');
+    player.message('/tradeSetup load / loadAndRun -> loads from config (and run)');
+    player.message('/tradeSetup removeAndSaveRun <?enchantname> -> remove recently found enchant, or given enchant from config and run');
+    player.message('/tradeSetup loadDefault -> loads from given standard enchant list, contains most enchantments with pricing');
+}
+
 new LinearCommand([['tradeSetup']], fun() {isPaused = true;}).process();
 new LinearCommand([['tradeSetup'], ['fixTrade'], ['boolean', "Boolean"]], allowFixingTradeTask).process();
 new LinearCommand([['tradeSetup'], ['add'], ['enchantment', "EnchantmentId"], ["level", "Integer", 0, 5], ["price", "Integer", 1, 64]], addTradeSetupTask).process();
