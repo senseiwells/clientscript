@@ -2502,10 +2502,52 @@ func = PositionPredicateFunctionScheduledTask(predicatePlacePower, actionPlacePo
 taskFunctionHolder.add(func);
 func = PositionPredicateFunctionScheduledTask(predicateSpawnProof, actionPlaceSpawnproofNearby, fun(){return spawnProofItem;});
 taskFunctionHolder.add(func);
+//call show help message
+showHelp = fun (){
+    player.message("/eCommand pause -> pauses task");
+    player.message("/eCommand move -> creates move forward task");
+    player.message("/eCommand toggleMessage -> toggles message printing");
+    player.message("/eCommand toggleActionBar -> toggles message printing at actionBar instead");
+    player.message("/eCommand disableSync -> tries to disable sync from server");
+    player.message("/eCommand setReachDistance <distance> -> set client side reach distance(it can cause desync!)");
+    player.message("/eCommand AccurateBlockPlacement <boolean> -> use accurateBlockPlacementProtocol (if server allows it)");
+    player.message("/eCommand toggleTrustClient-> trust client side world sync");
+    player.message("/eCommand setInterval <ms> -> milliseconds between tasks");
+    player.message("/eCommand setBlockPlacementInterval <ms> -> milliseconds between block placement tasks");
+    player.message("/eCommand expectedServerPing <ms> -> expected server ping for reference\n");
+    player.message("/eCommand help to see this message. /eCommand help task to see other helps.");
+};
+
+showTaskHelp = fun (){
+    player.message("--- tasks ---");
+    player.message("/efill <x y z> <x y z> <itemName> -> simulates client side fill task");
+    player.message("/efill <x y z> <x y z> <itemName> <Direction>-> simulates client side fill task with block's facing");
+    player.message("/eBreak <x y z> <x y z> <itemName> -> simulates client side break task");
+    player.message("/eBridge <x y z> <direction> <itemName> -> bridge placement task, but not stable");
+    player.message("/eBedrockBreaking ~ -> Bedrock Breaking script, requires netherite(diamond) pickaxe, haste 2, eff 5 + redstone torch, piston (and optional slime blocks)");
+    player.message("/eBedrockBreaking setItem <itemName> -> uses piston / sticky piston for bedrock breaking");
+    player.message("/eBedrockBreaking x y z <direction?> <headless> -> breaks or generates headless piston(optional direction) for given bedrock position");
+    player.message("/eBedrockBreaking rayTrace <direction?> <headless?> -> breaks or generates headless piston(optional direction) for given bedrock position");
+    player.message("/eBedrockBreaking setPos1 rayTrace/x? y? z? -> start area bedrock breaking task, pos 1");
+    player.message("/eBedrockBreaking setPos2 rayTrace/x? y? z? -> start area bedrock breaking task, pos 2");
+    player.message("/eBedrockBreaking Area x y z x y z -> start area bedrock breaking task, for Area");
+    player.message("/eDiagonalPlace <x y z> <direction> <itemName> -> places stair from start position toward direction");
+    player.message("/eCommand setBoltItem <itemType> <itemName> -> set bolt placing itemtype to given item");
+    player.message("/eDemibolt <x y z> <direction> -> starts Demi bolt placement task");
+    player.message("/eDiagonalBolt <x y z> <direction> -> starts Standard straight bolt placement task");
+    player.message("/eStandardBolt <x y z> <direction> -> starts Standard straight bolt placement task");
+    player.message("/eRailPowering setitem <item> -> sets supporting powering item for powered-rail search and power task");
+    player.message("/eRailPowering <boolean> -> starts or stops powered-rail search and power task");
+    player.message("/eSpawnProof <boolean> -> starts or stops placing spawn proof item task");
+    player.message("/eSpawnProof setItem <newItem> -> sets item for spawn proof task");
+
+};
 //Register commands.
 new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS]], fillScheduledTask).process();
 new LinearCommand([['eBreak'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakScheduledTask).process();
 new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS], ['direction', 'Word', DefaultSuggester.DIRECTIONS]], fillDirectionScheduledTask).process();
+new LinearCommand([['eCommand'],['help']], showHelp).process();
+new LinearCommand([['eCommand'],['help'], ['task']], showTaskHelp).process();
 new LinearCommand([['eCommand'],['pause']], pauseScheduledTask).process();
 new LinearCommand([['eCommand'],['move']], moveAutomaticTask).process();
 new LinearCommand([['eCommand'],['toggleMessage']], toggleMessageScheduledTask).process();
@@ -2537,6 +2579,8 @@ new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer', rayTraceX],['y', 'Int
 new LinearCommand([['eBedrockBreaking'],  ['rayTrace']], breakingLookingAtScheduledTask).process();
 new LinearCommand([['eBedrockBreaking'],  ['rayTrace'], ['direction', 'Word', ['north', 'west', 'east', 'south', 'up', 'down']], ['headless', 'Boolean']], breakingLookingAtHeadlessScheduledTask).process();
 new LinearCommand([['eBedrockBreaking'],['Area'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakBedrockAreaScheduledTask).process();
+
+showHelp();
 while (true){
     if (pause){
         sleep(50);
