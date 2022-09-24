@@ -323,13 +323,21 @@ fillTask = fun ( x, y, z, ex, ey, ez) {
     startPos = new Pos(x,y,z);
     endPos = new Pos(ex, ey, ez);
 };
-
+fun showHelp(){
+    player.message("/nuker setItem <itemName> -> set placing block for water or lava");
+    player.message("/nuker lavaSponge -> start lavaSponge task or stop");
+    player.message("/nuker waterSponge -> start waterSponge task or stop");
+    player.message("/nuker iceNuker -> start iceNuker task or stop");
+    player.message("/nuker setReach <reach> -> set reachDistance to consider (don't set it upper than 8)");
+    player.message("/nuker removeLavaArea <x> <y> <z> <x> <y> <z> -> start removing lava in area from start -> to end (move yourself)");
+}
 new LinearCommand([['nuker'], ['setItem'], ['itemName', 'Word', DefaultSuggester.BLOCKS]], setSingleRemovalBlock).process();
-new LinearCommand([['lavaSponge']], lavaSpongeOnOffTask).process();
-new LinearCommand([['waterSponge']], waterSpongeOnOffTask).process();
-new LinearCommand([['iceNuker']], iceNukerOnOffTask).process();
+new LinearCommand([['nuker'],['lavaSponge']], lavaSpongeOnOffTask).process();
+new LinearCommand([['nuker'],['waterSponge']], waterSpongeOnOffTask).process();
+new LinearCommand([['nuker'],['iceNuker']], iceNukerOnOffTask).process();
 new LinearCommand([['nuker'], ['setReach'], ['reachDistance', 'Integer']], setReachTask).process();
-new LinearCommand([['removeLavaArea'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], fillTask).process();
+new LinearCommand([['nuker'],['removeLavaArea'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], fillTask).process();
+new LinearCommand([['nuker'], ['showHelp']], showHelp).process();
 fun breakBlock(pos){
     //we need library for this?
     player.updateBreakingBlock(pos);
