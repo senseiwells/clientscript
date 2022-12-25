@@ -1,0 +1,193 @@
+/**
+ * Neat little script to refill items if you have more
+ * of that item in a shulker box in your inventory.
+ *
+ * To use simply run the script. You can configure
+ * the settings with the default keybind of x + r.
+ */
+
+import * from Minecraft;
+import ItemUtils from minecraft.ItemUtils;
+import InventoryUtils from minecraft.InventoryUtils;
+import MaterialUtils from minecraft.MinecraftUtils;
+import Direction from minecraft.PosUtils;
+
+CONFIG_HANDLER = new ConfigHandler("Refill From Shulker Config", false);
+
+MIN_COUNT_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Refill Count",
+    "description": "The amount of items before refilling",
+    "default_value": 10,
+    "min": 1,
+    "max": 64
+});
+
+REFILL_AMOUNT_CONFIG = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Refill Amount",
+    "description": "The max number of stacks to refill",
+    "default_value": 4,
+    "min": 1,
+    "max": 20
+});
+
+DISABLE_INPUT_ON_REFILL_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Disable Input When Refilling",
+    "description": "Whether player input (movement and mouse) is disabled when refilling",
+    "default_value": true
+});
+
+DELAY_BETWEEN_ACTIONS = Config.fromMap({
+    "type": "integer_slider",
+    "name": "Delay Between Actions",
+    "description": "The amount of ticks between each action (e.g. placing shulker -> opening shulker), you may need to increase this depending on your ping",
+    "default_value": 4,
+    "min": 0,
+    "max": 100
+});
+
+CONFIG_HANDLER.addConfigs(MIN_COUNT_CONFIG, REFILL_AMOUNT_CONFIG, DISABLE_INPUT_ON_REFILL_CONFIG, DELAY_BETWEEN_ACTIONS);
+
+KEYBIND = new KeyBind("Open Refull From Shulker Config");
+KEYBIND.setKeys("x", "r");
+KEYBIND.setCallback(fun() {
+    Player.get().openScreen(CONFIG_HANDLER.createScreen());
+});
+
+REFILLING = false;
+
+DISABLE_INPUT_LAMBDA = fun() {  
+    if (REFILLING && DISABLE_INPUT_ON_REFILL_CONFIG.getValue()) {
+        GameEvent.cancel();
+    }
+};
+
+new GameEvent("onKeyPress", DISABLE_INPUT_LAMBDA, true);
+new GameEvent("onMouseScroll", DISABLE_INPUT_LAMBDA, true);
+new GameEvent("onPlayerLook", DISABLE_INPUT_LAMBDA, true);
+
+fun output(message: String) {
+    print("[RefillFromShulker] " + message);
+}
+
+fun tryPlaceAroundPlayer(): Pos {
+    local player = Player.get();
+    local playerPos = player.getPos().toBlockPos();
+    local positions = {
+        playerPos.up(2): Direction.DOWN,
+        playerPos.east(): Direction.WEST,
+        playerPos.west(): Direction.EAST,
+        playerPos.north(): Direction.SOUTH,
+        playerPos.south(): Direction.NORTH
+    };
+    local shulker = Material.SHULKER_BOX.asBlock();
+    local world = player.getWorld();
+    foreach (position : positions) {
+        if (world.getBlockAt(position).isReplaceable() && player.canPlaceBlockAt(shulker, position)) {
+            player.interactBlock(position, positions[position]);
+            return position;
+        }
+    }
+    return null;
+}
+
+fun refill(material: Material) {
+    local player = Player.get();
+    local emptySlots = player.getEmptySlots();
+    if (len(emptySlots) <= 1) {
+        output("Failed to refill: '" + material.getId() +"'; No inventory space!");
+        return;
+    }
+    local neededCount = Math.min((len(emptySlots) - 1), REFILL_AMOUNT_CONFIG.getValue()) * material.asItemStack().getMaxCount();
+    local shulkerSlots = InventoryUtils.getAllSlotsForShulker();
+    local count = 0;
+    local wantedSlots = [];
+    foreach (slot : shulkerSlots) {
+        local shulker = player.getItemForSlot(slot);
+        local amount = ItemUtils.amountOfInBlockItem(shulker, material);
+        if (amount > 0) {
+            count += amount;
+            wantedSlots.append(slot);
+            if (count > neededCount) {
+                break;
+            }
+        }
+    }
+    if (count == 0) {
+        output("Failed to refill: '" + material.getId() + "'; Nothing to refill with!");
+        return;
+    } 
+    if (count < neededCount) {
+        output("Need more of '" + material.getId() + "' soon!");
+    }
+    output("Refilling '" + material.getId() + "'");
+
+    count = 0;
+    local task = new MinecraftTask();
+    REFILLING = true;
+    local delay = DELAY_BETWEEN_ACTIONS.getValue();
+    foreach (slot : wantedSlots) {
+        local pos = null;
+        task.waitThen(delay, fun() {
+            player.swapSlots(slot, 36);
+            player.setSelectedSlot(0);
+        });
+        task.waitThen(delay, fun() {
+            pos = tryPlaceAroundPlayer();
+        });
+        task.waitThen(delay, fun() {
+            if (pos != null) {
+                player.interactBlock(pos, Direction.DOWN);
+            }
+        });
+        task.waitThen(delay, fun() {
+            if (pos != null && player.getCurrentScreen() != null) {
+                foreach (slot : player.getAllSlotsFor(material, "external")) {
+                    if (count >= neededCount) {
+                        break;
+                    }
+                    count += player.getItemForSlot(slot).getCount();
+                    player.shiftClickSlot(slot);
+                }
+                player.closeScreen();
+            }
+        });
+        task.waitThen(delay, fun() {
+            if (pos != null) {
+                foreach (pickaxe : MaterialUtils.getPickaxes()) {
+                    local slot = player.getSlotFor(pickaxe);
+                    if (slot != null) {
+                        player.swapSlots(slot, 36);
+                        player.setSelectedSlot(0);
+                        break;
+                    }
+                }
+                player.breakBlock(pos);
+            }
+        });
+    }
+    task.then(fun() {
+        REFILLING = false;
+    });
+    task.run();
+}
+
+new GameEvent("onBlockPlaced", fun(block) {
+    local player = Player.get();
+    if (REFILLING || player.getGamemode() != "survival" || block.asItemStack().getMaxCount() == 1) {
+        return;
+    }
+    local slots = player.getAllSlotsFor(block);
+    local count = slots.map(fun(slot) {
+        return player.getItemForSlot(slot).getCount();
+    }).reduce(fun(a, b) {
+        return a + b;
+    });
+    if (count <= MIN_COUNT_CONFIG.getValue()) {
+        refill(block.getMaterial());
+    }
+}, true);
+
+hold();
