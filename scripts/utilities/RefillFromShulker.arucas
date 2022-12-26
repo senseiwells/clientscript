@@ -72,16 +72,23 @@ fun output(message: String) {
     print("[RefillFromShulker] " + message);
 }
 
-fun tryPlaceAroundPlayer(): Pos {
+fun getPositionsWithOpposing(start: Pos): Map /* of Pos: Direction */ {
+    return {
+        start.east(): Direction.WEST,
+        start.west(): Direction.EAST,
+        start.north(): Direction.SOUTH,
+        start.south(): Direction.NORTH
+    };
+}
+
+fun tryPlaceAroundPlayer(): Pos | Null {
     local player = Player.get();
     local playerPos = player.getPos().toBlockPos();
-    local positions = {
-        playerPos.up(2): Direction.DOWN,
-        playerPos.east(): Direction.WEST,
-        playerPos.west(): Direction.EAST,
-        playerPos.north(): Direction.SOUTH,
-        playerPos.south(): Direction.NORTH
-    };
+    local positions = getPositionsWithOpposing(playerPos);
+    local abovePlayer = playerPos.up(2);
+    positions[abovePlayer] = Direction.DOWN;
+    positions.putAll(getPositionsWithOpposing(abovePlayer));
+    
     local shulker = Material.SHULKER_BOX.asBlock();
     local world = player.getWorld();
     foreach (position : positions) {
