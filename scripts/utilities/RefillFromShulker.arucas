@@ -150,6 +150,10 @@ fun refill(material: Material) {
     foreach (slot : wantedSlots) {
         local pos = null;
         task.waitThen(delay, fun() {
+            if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
+                MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+            }
             player.swapSlots(slot, 36);
             player.setSelectedSlot(0);
         });
@@ -158,15 +162,11 @@ fun refill(material: Material) {
         });
         task.waitThen(delay, fun() {
             if (pos != null) {
-                if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
-                    MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
-                    MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
-                }
                 player.interactBlock(pos, Direction.DOWN);
-                if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
-                    MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
-                    MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
-                }
+            }
+            if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
+                MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
             }
         });
         task.waitThen(delay, fun() {
