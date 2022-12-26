@@ -84,11 +84,11 @@ fun getPositionsWithOpposing(start: Pos): Map /* of Pos: Direction */ {
 fun tryPlaceAroundPlayer(): Pos | Null {
     local player = Player.get();
     local playerPos = player.getPos().toBlockPos();
-    local positions = getPositionsWithOpposing(playerPos);
     local abovePlayer = playerPos.up(2);
+    local positions = getPositionsWithOpposing(abovePlayer);
     positions[abovePlayer] = Direction.DOWN;
-    positions.putAll(getPositionsWithOpposing(abovePlayer));
-    
+    positions.putAll(getPositionsWithOpposing(playerPos));
+
     local shulker = Material.SHULKER_BOX.asBlock();
     local world = player.getWorld();
     foreach (position : positions) {
