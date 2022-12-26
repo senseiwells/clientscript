@@ -39,6 +39,21 @@ DISABLE_INPUT_ON_REFILL_CONFIG = Config.fromMap({
     "default_value": true
 });
 
+DISABLE_EASY_PLACE_ON_REFILL_CONFIG = Config.fromMap({
+    "type": "boolean",
+    "name": "Disable Easy Place Mode When Refilling",
+    "description": "Easy place mode will block placing the shulker, so enable this if building with it, you need set the hotkey config too for this to work",
+    "default_value": true
+});
+
+EASY_PLACE_MODE_HOTKEY_CONFIG = Config.fromMap({
+    "type": "string",
+    "name": "Hotkey for toggling easy place mode on/off",
+    "description": "Set this to whatever is your hotkey for toggling easy place mode, it will be used when turning it off for placing down the shulker",
+    "default_value": "g"
+});
+
+
 DELAY_BETWEEN_ACTIONS = Config.fromMap({
     "type": "integer_slider",
     "name": "Delay Between Actions",
@@ -48,7 +63,11 @@ DELAY_BETWEEN_ACTIONS = Config.fromMap({
     "max": 100
 });
 
-CONFIG_HANDLER.addConfigs(MIN_COUNT_CONFIG, REFILL_AMOUNT_CONFIG, DISABLE_INPUT_ON_REFILL_CONFIG, DELAY_BETWEEN_ACTIONS);
+
+
+CONFIG_HANDLER.addConfigs(MIN_COUNT_CONFIG, REFILL_AMOUNT_CONFIG, DISABLE_INPUT_ON_REFILL_CONFIG, DISABLE_EASY_PLACE_ON_REFILL_CONFIG, EASY_PLACE_MODE_HOTKEY_CONFIG, DELAY_BETWEEN_ACTIONS);
+CONFIG_HANDLER.setSaveOnClose(true);
+CONFIG_HANDLER.read();
 
 KEYBIND = new KeyBind("Open Refull From Shulker Config");
 KEYBIND.setKeys("x", "r");
@@ -139,7 +158,15 @@ fun refill(material: Material) {
         });
         task.waitThen(delay, fun() {
             if (pos != null) {
+                if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
+                    MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                    MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                }
                 player.interactBlock(pos, Direction.DOWN);
+                if(DISABLE_EASY_PLACE_ON_REFILL_CONFIG.getValue()){
+                    MinecraftClient.get().pressKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                    MinecraftClient.get().releaseKey(EASY_PLACE_MODE_HOTKEY_CONFIG.getValue());
+                }
             }
         });
         task.waitThen(delay, fun() {
