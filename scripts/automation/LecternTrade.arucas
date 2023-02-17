@@ -106,8 +106,10 @@ fun getAxe() {
 // Loop until lectern placed
 fun placeBlock(lecternCoordinates) {
     while (IS_RUNNING) {
-        if (world.getBlockAt(lecternCoordinates).getId() == "lectern") return true;
-        
+        if (world.getBlockAt(lecternCoordinates).getId() == "lectern") {
+            return true;
+        }
+
         getLectern();
 
         player.interactBlock(lecternCoordinates, "up", lecternCoordinates, false);
@@ -174,7 +176,12 @@ fun runTrade(villager) {
     }
 
     isWanted = false;
-    index = player.getCurrentScreen().getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
+    index = null;
+    try {
+        index = player.getCurrentScreen().getIndexOfTradeItem(ItemStack.of(Material.ENCHANTED_BOOK));
+    } catch (e) {
+        // No such trade...
+    }
     if (index == null){
         player.closeScreen();
 
@@ -189,13 +196,21 @@ fun runTrade(villager) {
 
         foreach (key : enchants.getKeys()) {
             enchant = enchants.get(key);
-            wanted = wantedList.get(key);   // Try to get the enchant in the list, return null if enchant isn't wanted
+            // Try to get the enchant in the list, return null if enchant isn't wanted
+            wanted = wantedList.get(key);   
 
             if (wanted == null){
                 isWanted = false;
                 break;
-            } else {print("Wanted -> " + key + " " + wanted.get(0) + " for " + wanted.get(1) + "E | Found -> " + key + " " + enchant + " for " + price + "E");}
-            if (enchant >= wanted.get(0) && price <= wanted.get(1)){isWanted = true;break;} else {isWanted = false;}
+            } else {
+                print("Wanted -> " + key + " " + wanted.get(0) + " for " + wanted.get(1) + "E | Found -> " + key + " " + enchant + " for " + price + "E");
+            }
+            if (enchant >= wanted.get(0) && price <= wanted.get(1)) {
+                isWanted = true;
+                break;
+            } else {
+                isWanted = false;
+            }
         }
     }
 
