@@ -29,7 +29,7 @@ hatCommandMap = {
             }
         },
         "help" : {
-            "" :  fun(){
+            "" : fun() {
                 text = "The base/parent command is /armorSlotAbuse.\nHolding any item and doing: /armorslotabuse [slotName] \nwill swap the item on (main)hand with the item in the chosen armor slot.";
                 text = Text.of(text);
                 Player.get().message(text.format("GOLD"));
