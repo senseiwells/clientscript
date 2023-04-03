@@ -1,0 +1,75 @@
+import * from Minecraft;
+import * from minecraft.CommandUtils;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+enabled = false;
+autoPause = false;
+interval = 15;
+waitingTick = 200;
+waitedTick = 0;
+new GameEvent("onDimensionChange", fun(newWorld) {
+    player = client.getPlayer();
+}).register();
+
+new GameEvent("onFishBite", fun(entity) {
+    if (!enabled) return;
+    waitedTick = 0;
+    checkAutopause();
+    player.use('once');
+    new MinecraftTask().waitThen(interval, fun(){
+        player.use('once');
+    }).run();
+    
+}).register();
+
+new GameEvent("onClientTick", fun() {
+    if (!enabled) return;
+    waitedTick ++;
+    if (waitedTick >= waitingTick){
+        player.use('once');
+        waitedTick = 0;
+        new MinecraftTask().waitThen(interval, fun(){
+            player.use('once');
+        }).run();
+    }
+}).register();
+
+toggleAutoPauseTask = fun() {
+    autoPause = !autoPause;
+    player.message('Will pause when inventory has no empty slot');
+};
+setEnabledTask = fun(newEnabled) {
+    enabled = newEnabled;
+    player.message('Now AutoFish is set to '+ newEnabled);
+};
+toggleTask = fun() {
+    newEnabled = !enabled;
+    setEnabledTask(newEnabled);
+};
+
+checkAutopause = fun(){
+    foreach(i : range(9, 45)){
+        if (player.getItemForSlot(i).getCount() == 0){
+            return;
+        }
+    }
+    enabled = false;
+    player.message('Stopped because inventory was full!');
+};
+setWorkIntervalTask = fun(newInterval) {
+    interval = newInterval;
+    player.message('Now waiting for '+ newInterval + 'ticks');
+};
+setMaxWaitingTimeTask = fun(newInterval) {
+    waitingTick = newInterval;
+    player.message('Now allows max idle for '+ newInterval + 'ticks');
+};
+
+print("AutoFish loaded with commands: autofish, autofish autoPause, autofish setInterval <ticks>, autofish maxWaitingTicks <ticks>");
+new LinearCommand([['autofish'],['enabled', 'Boolean']], setEnabledTask).process();
+new LinearCommand([['autofish']], toggleTask).process();
+new LinearCommand([['autofish'], ['autoPause']], toggleAutoPauseTask).process();
+new LinearCommand([['autofish'], ['setInterval'], ['ticks', 'Integer', -1, 500]], setWorkIntervalTask).process();
+new LinearCommand([['autofish'], ['maxWaitingTicks'], ['ticks', 'Integer', 15, 500]], setMaxWaitingTimeTask).process();
+hold();

@@ -1,0 +1,221 @@
+import * from Minecraft;
+import * from minecraft.CommandUtils;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+enabled = true;
+workInterval = -1;
+minY = -65;
+maxY = 384;
+maxAttackBlockPerActions = 20;
+reachDistance = 18;
+currentTick = 0;
+wasWorking = false;
+
+autoPause = false;
+
+new GameEvent("onDimensionChange", fun(newWorld) {
+    player = client.getPlayer();
+    world = newWorld;
+    wasWorking = false;
+}).register();
+
+new GameEvent("onClientTick", fun() {
+    if (!enabled) return;
+    currentTick++;
+}).register();
+
+predicates = {};
+predicateProperties = {};
+setReachDistance = fun(newReach) {
+    reachDistance = newReach;
+};
+checkAutopause = fun(){
+    if (!autoPause) return;
+    foreach(i : range(9, 45)){
+        if (player.getItemForSlot(i).getCount() == 0){
+            return;
+        }
+    }
+    enabled = false;
+    player.message('Stopped because inventory was full!');
+};
+attackBlockIf = fun(pos) {
+    block = world.getBlockAt(pos);
+    if (predicateBlock(block)) {
+        try {
+            breakBlock(pos);
+            checkAutopause();
+        }
+        catch (e){
+            null;
+        }
+        
+
+        return true;
+    }
+    return false;
+};
+fun breakBlock(pos){
+    if (isBlockInstantBreakable(pos)){
+        player.attackBlock(pos, 'up');
+        return;
+    }
+    //we need library for this?
+    player.updateBreakingBlock(pos);
+    amount = 20;
+    while (!world.isAir(pos) && amount > 0){
+        if (!isInReach(pos)) break;
+        player.updateBreakingBlock(pos);
+        sleep(50);
+        amount--;
+    }
+}
+fun isBlockInstantBreakable(pos){
+    //assume pickaxe
+    b = world.getBlockAt(pos);
+    if (b.getId() == 'piston' || b.getId() == 'sticky_piston'){
+         property = b.getBlockProperties();
+         if (property.get('extended') && world.getBlockAt(pos.offset(property.get('facing'))).getId() == 'moving_piston'){
+            return false;
+         }
+    }
+    return player.getBlockBreakingSpeed(player.getHeldItem(),b) >=  b.getHardness() * 30;
+}
+setMinYTask = fun(newY){
+    minY = newY;
+};
+setMaxYTask = fun(newY){
+    maxY = newY;
+};
+checkRadius = fun() {
+    playerPos = player.getPos();
+    current = 0;
+    checkAutopause();
+    // foreach (pos : world.getPositionsFromCentre(playerPos, reachDistance, reachDistance, reachDistance)){ Sensei wtf?
+
+    //replacement code start
+    x, y, z = playerPos.toList();
+    sx, sy, sz = [x - reachDistance, Math.min(maxY, Math.max(minY, y - reachDistance)), z - reachDistance];
+    ex, ey, ez = [x + reachDistance, Math.min(maxY, Math.max(minY, y + reachDistance)), z + reachDistance];
+    foreach (pos : world.getPositions(new Pos(sx, sy, sz), new Pos(ex, ey, ez))){
+    //end
+        if (pos.distanceTo(playerPos) <= reachDistance && attackBlockIf(pos)){
+            current ++;
+        }
+        if (current >= maxAttackBlockPerActions){
+            return;
+        }
+    }
+};
+
+isInReach = fun(target) {
+    playerPos = player.getPos();
+    return target.distanceTo(playerPos) < reachDistance;
+};
+fun predicateBlock(block) {
+    blockId = block.getId();
+    foreach (target : predicates.getKeys()) {
+        isExact = predicates.get(target);
+        if (isExact == null) return false;
+        if (isExact) {
+            if (target == blockId) {
+                return requiresProperty(block);
+            }
+        }
+        else {
+            if (blockId.matches(target)) {
+                return requiresProperty(block);
+            }
+        }
+    }
+    return false;
+}
+// returns if block matches property map
+fun requiresProperty(block) {
+    prop = block.getBlockProperties();
+    requiredPropertyMap = predicateProperties.get(block.getId());
+    if (requiredPropertyMap != null) {
+        foreach(keys : requiredPropertyMap.getKeys()){
+            if (prop.get(keys) == null) continue;
+            if (prop.get(keys).toString() != requiredPropertyMap.get(keys)) return false;
+        }
+    }
+    return true;
+}
+
+addPredicate = fun(blockName, isExact) {
+    predicates.put(blockName, isExact);
+    player.message('Added ' + blockName + ' , exact matching : '+ isExact);
+};
+addPredicateRegex = fun(blockName) {
+    predicates.put(blockName, false);
+    player.message('Added ' + blockName + ' , exact matching : '+ false);
+};
+addPredicateProperty = fun(blockName, isExact, propname, propvalue) {
+    predicates.put(blockName, isExact);
+    predicateProperties.put(blockName, {propname : propvalue});
+    player.message('Added ' + blockName + ' , exact matching : '+ isExact);
+};
+removePredicate = fun(blockName) {
+    if(predicates.get(blockName) == null) return;
+    predicates.remove(blockName);
+    predicateProperties.remove(blockName);
+};
+
+setEnabledTask = fun(newEnabled) {
+    enabled = newEnabled;
+    player.message('Now Nuker is set to '+ newEnabled);
+};
+toggleTask = fun() {
+    player = client.getPlayer();
+    world = client.getWorld();
+    newEnabled = !enabled;
+    setEnabledTask(newEnabled);
+};
+toggleAutoPauseTask = fun() {
+    autoPause = !autoPause;
+    player.message('Will pause when inventory has no empty slot : ' + autoPause);
+};
+
+setWorkIntervalTask = fun(newInterval) {
+    workInterval = newInterval;
+    player.message('Now working every '+ newInterval + 'ms');
+};
+
+setMaxActionsTask = fun (newLimit) {
+    maxAttackBlockPerActions = newLimit;
+    player.message('Now max block attack count is set to '+ newLimit);
+};
+
+suggesterRemove = fun(args...) {
+    return predicates.getKeys();
+};
+
+print("Nuker loaded with /nuker command");
+print("nuker <add|remove> regex <regex> - add/remove block to nuker by regex");
+print("nuker <add|remove> <block> - add/remove block to nuker");
+print("nuker <minY|maxY> <value> - set min/max Y limit for nuker");
+new LinearCommand([['nuker'], ['minY'], ['value', 'Integer', -999, 999]], setMinYTask).process();
+new LinearCommand([['nuker'], ['maxY'], ['value', 'Integer', -999, 999]], setMaxYTask).process();
+new LinearCommand([['nuker'],['enabled', 'Boolean']], setEnabledTask).process();
+new LinearCommand([['nuker'], ['reachDistance'], ['reach', 'Integer', 1, 100]], setReachDistance).process();
+new LinearCommand([['nuker']], toggleTask).process();
+new LinearCommand([['nuker'], ['autoPause']], toggleAutoPauseTask).process();
+new LinearCommand([['nuker'],['add'], ['block', 'Word', DefaultSuggester.BLOCKS], ['exact', 'Boolean']], addPredicate).process();
+new LinearCommand([['nuker'],['add'], ['regex'], ['argument', 'GreedyString']], addPredicateRegex).process();
+new LinearCommand([['nuker'],['remove'], ['block', 'GreedyString', suggesterRemove]], removePredicate).process();
+new LinearCommand([['nuker'],['workInterval'], ['ms', 'Integer', -1, 500]], setWorkIntervalTask).process();
+new LinearCommand([['nuker'],['add'], ['block', 'Word', DefaultSuggester.BLOCKS], ['exact', 'Boolean'], ['propertyName', 'Word'], ['propertyValue', 'Word']], addPredicateProperty).process();
+new LinearCommand([['nuker'],['maxActions'], ['count', 'Integer', 0, 500]], setMaxActionsTask).process();
+while (true) {
+    if (!enabled) {
+        sleep(50);
+        continue;
+    }
+    if (workInterval <= 0 || workInterval == 0 || Math.mod(currentTick, workInterval) == 0) {
+        checkRadius();
+    }
+    sleep(50);
+}
