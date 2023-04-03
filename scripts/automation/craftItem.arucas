@@ -1545,13 +1545,14 @@ class ScreenInventory : ContainerInventory {
         'GenericContainer' : true,
         'ShulkerBox' : true
     };
+    static var CLICK_SLEEP_MS = 25; // sleep 100 ms after click
     static var MAX_TRIES = 10;
-    static var WAIT_TIME = 0.15; // 0.3 second
-    static var MAX_CPT = 24; // 40 cps = 2 cpt(click per tick)
-    static var CHECK_EVERY = 4; // check every 4 ticks
+    static var WAIT_TIME = 0.06; // 0.3 second
+    static var MAX_CPT = 80; // 40 cps = 2 cpt(click per tick)
+    static var CHECK_EVERY = 2; // check every 4 ticks
     static var TICK = 2; // 20 ticks per second, decreases by 1 every tick
     static var CLICKED_COUNT = 0; // number of clicks in a second, refreshed every second
-    static var CLICK_SLEEP_MS = 50; // sleep 100 ms after click
+
     var itemList = [];
     var slotNums = []; // saves slot numbers of items
     ScreenInventory() : super(27){
@@ -5434,6 +5435,41 @@ LinearCommand.register(['recipeManager', 'selectRecipes'], fun() {
     print('removeRecipe <recipe> : remove given recipe from SELECTED_RECIPES');
     print('saveRecipes : save SELECTED_RECIPES to file');
     print('loadRecipes : load SELECTED_RECIPES from file');
+});
+
+/*
+    ScreenInventory has following static variables. Lets modify them.
+    static var CLICK_SLEEP_MS = 25; // sleep 100 ms after click
+    static var MAX_TRIES = 10;
+    static var WAIT_TIME = 0.06; // 0.3 second
+    static var MAX_CPT = 80; // 40 cps = 2 cpt(click per tick)
+*/
+// recipemanager speed <optionName> <value> 
+LinearCommand.register(['recipeManager', ['speed'], ['clickSleepMs', 'String'], ['value', 'Number']], fun(optionName, value) {
+    // lets set CLICK_SLEEP_MS to given value.
+    ScreenInventory.CLICK_SLEEP_MS = value;
+    // print
+    print("Now CLICK_SLEEP_MS is " + value);
+});
+LinearCommand.register(['recipeManager', ['speed'], ['maxTries', 'String'], ['value', 'Number']], fun(optionName, value) {
+    // lets set MAX_TRIES to given value.
+    ScreenInventory.MAX_TRIES = value;
+    // print
+    print("Now MAX_TRIES(Max Times to sleep WAIT_TIME) is " + value);
+});
+
+LinearCommand.register(['recipeManager', ['speed'], ['waitTime', 'String'], ['value', 'Number']], fun(optionName, value) {
+    // lets set WAIT_TIME to given value.
+    ScreenInventory.WAIT_TIME = value;
+    // print
+    print("Now WAIT_TIME(Screen Sync Wait Time) is " + value);
+});
+
+LinearCommand.register(['recipeManager', ['speed'], ['maxCpt', 'String'], ['value', 'Number']], fun(optionName, value) {
+    // lets set MAX_CPT to given value.
+    ScreenInventory.MAX_CPT = value;
+    // print
+    print("Now MAX_CPT(Click Per Tick) is " + value);
 });
 
 print("recipemanager / searchInventory commands are loaded!");
