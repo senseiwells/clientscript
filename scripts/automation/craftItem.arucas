@@ -24,7 +24,7 @@ RESTRICTION_MAP = {
     "reach_distance" : 5,
     // max tries before screen inventory query is cancelled.
     "max_tries" : 10,
-    "CRAFTING_TREE" : false, // if true, use crafting tree to find recipes. if false, use recipe book.
+    "CRAFTING_TREE" : true, // if true, use crafting tree to find recipes. if false, use recipe book.
     "warn_level" : 1, // 0: print debug, warn, error , 1: print warn and error, 2: print error only
     "use_actionbar" : false // use actionbar to display messages. if false, use print.
 };
@@ -793,6 +793,14 @@ class CombinedIterable : Iterable {
         }
     }
 
+    CombinedIterable(array : List, filter : Set) : super() {
+        this.array = array.filter(fun (x){return !x.isEmpty();});
+        this.array = this.array.map(fun(x){return x.filter(fun(y){return filter.contains(y.getFullId());});});
+        this.maxSize = 1;
+        for (i = 0; i < len(this.array); i++) {
+        }
+    }
+
     fun size() : Number {
         return this.maxSize;
     }
@@ -1538,12 +1546,12 @@ class ScreenInventory : ContainerInventory {
         'ShulkerBox' : true
     };
     static var MAX_TRIES = 10;
-    static var WAIT_TIME = 0.05; // 0.3 second
+    static var WAIT_TIME = 0.15; // 0.3 second
     static var MAX_CPT = 24; // 40 cps = 2 cpt(click per tick)
     static var CHECK_EVERY = 4; // check every 4 ticks
-    static var TICK = 4; // 20 ticks per second, decreases by 1 every tick
+    static var TICK = 2; // 20 ticks per second, decreases by 1 every tick
     static var CLICKED_COUNT = 0; // number of clicks in a second, refreshed every second
-    static var CLICK_SLEEP_MS = 100; // sleep 100 ms after click
+    static var CLICK_SLEEP_MS = 50; // sleep 100 ms after click
     var itemList = [];
     var slotNums = []; // saves slot numbers of items
     ScreenInventory() : super(27){
@@ -1576,6 +1584,7 @@ class ScreenInventory : ContainerInventory {
 
     fun moveFrom(stack, amount) : Number {
         containsAmount = this.match(stack);
+        Logger.info("Player contains " + containsAmount + " " + stack.getFullId() + " in inventory.");
         // do nothing
         return Math.min(containsAmount, amount);
     }
@@ -1775,8 +1784,8 @@ class ScreenInventory : ContainerInventory {
         // try 10 times
         for (i = 0; i < ScreenInventory.MAX_TRIES; i++) {
             // if screen is null, break
-            player.closeScreen();
             sleep(ScreenInventory.WAIT_TIME * 1000);
+            player.closeScreen();
             if (player.getCurrentScreen() == null) {
                 break;
             }
@@ -1829,17 +1838,24 @@ class ScreenInventory : ContainerInventory {
     static fun openScreen(pos : Pos) {
         player = Player.get();
         player.closeScreen();
+        for (i = 0; i < ScreenInventory.MAX_TRIES; i++) {
+            player.closeScreen();
+            sleep(ScreenInventory.WAIT_TIME * 1000);
+            if (!ScreenInventory.hasOpenScreen()){
+                break;
+            }
+        }
         // if player can interact with block
         if (ScreenInventory.canInteractBlock(pos)) {
             // try for MAX_TRIES times to open screen
+            player.interactBlock(pos, 'up');
             for (i = 0; i < ScreenInventory.MAX_TRIES; i++) {
-                player.interactBlock(pos, 'up');
                 // if screen is not null, break
+                 sleep(ScreenInventory.WAIT_TIME * 1000);
                 if (ScreenInventory.hasOpenScreen()) {
                     break;
                 }
                 // else sleep
-                sleep(ScreenInventory.WAIT_TIME * 1000);
             }
             sleep(ScreenInventory.WAIT_TIME * 1000);
             return ScreenInventory.hasOpenScreen();
@@ -1886,7 +1902,6 @@ class ScreenInventory : ContainerInventory {
     // throw item from slot
     static fun throwItem(slot : Number) {
         // Debug
-        Logger.debug("Throwing item from slot " + slot);
         ScreenInventory.getPlayer().clickSlot(slot, 'left', 'throw');
         ScreenInventory.cpsRestriction();
     }
@@ -1894,7 +1909,6 @@ class ScreenInventory : ContainerInventory {
     // abstract click slot function, get Player and call clickSlot
     static fun clickSlot(slot : Number, click : String, action : String) {
         // Debug
-        Logger.debug("Clicking slot " + slot + " with " + click + " click and " + action + " action");
         ScreenInventory.getPlayer().clickSlot(slot, click, action);
         ScreenInventory.cpsRestriction();
     }
@@ -1957,7 +1971,6 @@ class ScreenInventory : ContainerInventory {
 
     static fun migrateStack(slotFrom : Number, slotTo : Number) {
         // debug
-        Logger.debug("Migrating items from " + slotFrom + " to " + slotTo);
         // we will click slots.
         // first we left click slotFrom, then we left click slotTo. this will move all items from slotFrom to slotTo.
         ScreenInventory.leftClickSlot(slotFrom);
@@ -1966,7 +1979,6 @@ class ScreenInventory : ContainerInventory {
 
     static fun moveSlot(slotFrom : Number, slotTo: Number, amount : Number) {
         // debug
-        Logger.debug("Moving " + amount + " items from " + slotFrom + " to " + slotTo);
         // we will click slots.
         // first we left click slotFrom, then we right click slotTo for amount times.
         ScreenInventory.leftClickSlot(slotFrom);
@@ -2004,6 +2016,7 @@ class ScreenInventory : ContainerInventory {
                 Logger.debug("Slot " + this.slotNums[i] + " has " + slotStackSize + " items, extracting " + amountToExtract);
                 // move stack to slot by clicking, use migrateStack if we need to move all items.
                 if (amountToExtract == slotStackSize) {
+                    Logger.info("Migrating amount of "+ amountToExtract + " items from slot " + this.slotNums[i] + " to slot " + slot );
                     ScreenInventory.migrateStack(this.slotNums[i], slot);
                 }
                 // else move items one by one
@@ -2047,6 +2060,7 @@ class ScreenInventory : ContainerInventory {
                 amountToExtract = Math.min(amount, slotStackSize);
                 // move stack to slot by clicking, use migrateStack if we need to move all items.
                 if (amountToExtract == slotStackSize) {
+                    Logger.info("Migrating amount of "+ amountToExtract + " items from slot " + this.slotNums[i] + " to slot " + slot );
                     ScreenInventory.migrateStack(this.slotNums[i], slot);
                 }
                 // else move items one by one
@@ -2100,13 +2114,14 @@ class ScreenInventory : ContainerInventory {
                     // if amount is equal to amountToExtract, migrate stack
                     if (insertTarget[1] == slotStackSize) {
                         // debug amount, slotNum, insertTarget[0]
-                        Logger.debug("Migrating stack from " + slotNum + " to " + insertTarget[0] + " for amount " + insertTarget[1]);
+                        Logger.info("Migrating stack from " + slotNum + " to " + insertTarget[0] + " for amount " + insertTarget[1]);
                         ScreenInventory.migrateStack(slotNum, insertTarget[0]);
                     }
                     // else move slot
                     else {
+                        amountToExtract = insertTarget[1];
                         // debug amount, slotNum, insertTarget[0], insertTarget[1]
-                        Logger.debug("Moving slot from " + slotNum + " to " + insertTarget[0] + " for amount " + insertTarget[1]);
+                        Logger.info("Moving slot from " + slotNum + " to " + insertTarget[0] + " for amount " + insertTarget[1]);
                         ScreenInventory.moveSlot(slotNum, insertTarget[0], insertTarget[1]);
                     }
                     // set slot for storage with moveStack
@@ -2158,6 +2173,7 @@ class ScreenInventory : ContainerInventory {
                 if (insertTarget != null) {
                     // if amount is equal to amountToExtract, migrate stack
                     if (insertTarget[1] == slotStackSize) {
+                        Logger.info("Migrating amount of "+ slotStackSize + " items from slot " + this.slotNums[i] + " to slot " + slot );
                         ScreenInventory.migrateStack(slotNum, insertTarget[0]);
                     }
                     // else move slot
@@ -2168,9 +2184,9 @@ class ScreenInventory : ContainerInventory {
                     storage.moveStack(item, insertTarget[1], insertTarget[0]);
                 }
                 // decrement amount from item
-                this.getSlot(i).setStackSize(slotStackSize - slotStackSize);
+                this.getSlot(i).setStackSize(slotStackSize - insertTarget[1]);
                 // increment extracted amount
-                extracted += slotStackSize;
+                extracted += insertTarget[1];
                 // if item amount is 0, remove item from slot
                 if (this.getSlot(i).getCount() == 0) {
                     this.removeSlot(i);
@@ -2210,10 +2226,12 @@ class ScreenInventory : ContainerInventory {
                 if (insertTarget != null) {
                     // if amount is equal to amountToExtract, migrate stack
                     if (insertTarget[1] == amountToExtract) {
+                        Logger.info("Migrating amount of "+ amountToExtract + " items from slot " + this.slotNums[i] + " to slot " + slot );
                         ScreenInventory.migrateStack(slotNum, insertTarget[0]);
                     }
                     // else move slot
                     else {
+                        amountToExtract = insertTarget[1];
                         ScreenInventory.moveSlot(slotNum, insertTarget[0], insertTarget[1]);
                     }
                     // set slot for storage with moveStack
@@ -3788,6 +3806,7 @@ class CraftingPlan {
     var stacktrace : String = "";
     var recipeList = null; // list of recipes that can craft item.
     var recursiveCount = 0;
+    var itemRestrictions = Set.of(); // items to use for crafting.
     var externalIngredients : Map = {}; // External ingredients is ingredients that is already in inventory, but its not in player inventory.
 
     // fun createChildPlan(item : ItemStack | String, amount : int) : CraftingPlan  -> creates child plan that crafts item, with sharedRecipes reference.
@@ -3800,7 +3819,9 @@ class CraftingPlan {
         this.targetMap.increment(ItemStack.of(targetOutput), targetAmount);
         this.stacktrace = targetOutput;
         if (RESTRICTION_MAP.get('CRAFTING_TREE') == true) {
-            this.recipeList = new RecipeTree(inventory.getItems()).getRecipes();
+            recipeTree = new RecipeTree(inventory.getItems());
+            this.recipeList = recipeTree.getRecipes();
+            this.itemRestrictions.addAll(recipeTree.checkeditems);
         }
         else {
             this.recipeList = RecipeManager.ALL_RECIPES;
@@ -3808,7 +3829,8 @@ class CraftingPlan {
         this.search();
     }
 
-    CraftingPlan(targetOutput : String, targetAmount : Number, inventory : MatchableInventory, sharedRecipes : Set, craftingTargets : Set, recursiveCount : Number, stacktrace : String, inheritedRecipeTree : List) {
+    CraftingPlan(targetOutput : String, targetAmount : Number, inventory : MatchableInventory, sharedRecipes : Set,
+     craftingTargets : Set, recursiveCount : Number, stacktrace : String, inheritedRecipeTree : List, inheritedItems : Set) {
         this.inventory = inventory; // we don't clone here child plan should be created from forked inventory.
         this.sharedRecipes = sharedRecipes;
         this.targetOutput = targetOutput;
@@ -3819,6 +3841,7 @@ class CraftingPlan {
         this.stacktrace = stacktrace;
         this.recursiveCount = recursiveCount;
         this.recipeList = inheritedRecipeTree;
+        this.itemRestrictions = inheritedItems;
         this.search();
     }
 
@@ -3924,7 +3947,8 @@ class CraftingPlan {
         Logger.debug(this.stacktrace + " < " + item);
         craftingTargets.add(this.targetOutput);
         // debug for craftingTargets
-        childPlan = new CraftingPlan(item, amount * this.targetAmount, inventory, this.sharedRecipes.copy(), craftingTargets, this.recursiveCount + 1, this.stacktrace + " < " + item, this.recipeList);
+        childPlan = new CraftingPlan(item, amount * this.targetAmount, inventory, this.sharedRecipes.copy(), craftingTargets, 
+            this.recursiveCount + 1, this.stacktrace + " < " + item, this.recipeList, this.itemRestrictions);
         // return childPlan
         return childPlan;
     }
@@ -3943,8 +3967,10 @@ class CraftingPlan {
             playerAmount = 0;
             if (playerInv != null) {
                 playerAmount = playerInv.match(ItemStack.of(this.targetOutput), false);
+                Logger.debug("player inventory contains " + this.targetOutput + " x " + playerAmount + " (total : " + containsAmount + ")");
             }
             else {
+                throw new Error("Cannot get player inventory");
                 playerAmount = 0;
             }
             if (containsAmount - playerAmount > 0) {
@@ -3954,7 +3980,6 @@ class CraftingPlan {
         clonedInventory = this.inventory;
         if (containsAmount >= this.targetAmount) {
             Logger.debug("Planned recipe for already existing item : " + this.targetOutput + " x " + this.targetAmount);
-            // calculate externalIngredients, the amount of items that has to be moved.
             this.isCraftable = true;
             this.ingredients = {};
             return;
@@ -4006,12 +4031,16 @@ class CraftingPlan {
             this.sharedRecipes.add(recipe);
             recipeOutputCount = recipe.getOutput().getCount();
             recipeIngredientCombinations = new CombinedIterable(recipe.getIngredients());
+            // if itemRestrictions is not null, filter recipeIngredientCombinations
+            if (!this.itemRestrictions.isEmpty()) {
+                recipeIngredientCombinations = new CombinedIterable(recipe.getIngredients(), this.itemRestrictions);
+            }
             testRecipes = Set.of();
             foreach (recipeIngredientCombination : recipeIngredientCombinations) {
-                Logger.actionCounter("testing childs : "+ recipeIngredientCombination);
                 if (testRecipes.contains(Set.of().addAll(recipeIngredientCombination))){
                     continue;
                 }
+                Logger.actionCounter("testing childs : "+ recipeIngredientCombination);
                 testRecipes.add(Set.of().addAll(recipeIngredientCombination));
                 // flat list of ingredients
                 ingredients = {}; // frequencyMap
@@ -4096,16 +4125,13 @@ class CraftingPlan {
             }
         }
         foreach (item : this.getExternalItems()) {
-            Logger.actionCounter("moving item : " + item.getFullId() +" x " +item.getCount() +" which is not in inventory");
             Logger.info("moving item : " + item.getFullId() + " x " +item.getCount() + " which is not in inventory");
-            Assert.assert(this.inventory.match(item, false) >= item.getCount(), "inventory does not match item : " + item.getFullId() + " x " + item.getCount());
             movedAmount = this.inventory.moveFrom(item, item.getCount());
             Assert.assert(movedAmount == item.getCount(), "Cannot move item : " + item.getFullId() + " x " + item.getCount() + ", moved amount : " + movedAmount + " but required amount : " + item.getCount());
         }
         // craft this plan with recipe.
         // take required items from inventory by moveFrom method
         foreach (item : this.getRequiredItems()) {
-            Logger.actionCounter("moving item : " + item.getFullId() + " for crafting material");
             Logger.info("moving item : " + item.getFullId() + " x " +item.getCount() + " for crafting material");
             movedAmount = this.inventory.moveFrom(item, item.getCount());
             Assert.assert(movedAmount == item.getCount(), "Cannot move item : " + item.getFullId() + " x " + item.getCount() + ", moved amount : " + movedAmount + " but required amount : " + item.getCount());
@@ -4282,7 +4308,7 @@ class RecipeTree {
         if (useAllRecipe) {
             this.unused.addAll(Recipe.ALL.filter(fun (recipe){
                 return recipe.getCraftingType() == 'crafting';
-            }););
+            }));
         }
         else {
             this.unused.addAll(RecipeManager.SELECTED_RECIPES);
@@ -4593,9 +4619,9 @@ class RecipeManager {
             // open crafting table
             // wait for crafting table to open
             // try 10 times
+            Player.get().interactBlock(craftingTablePos, 'up');
             for (i = 0; i < ScreenInventory.MAX_TRIES; i++) {
                 Logger.info("Trying to open crafting table");
-                Player.get().interactBlock(craftingTablePos, 'up');
                 // wait for 1 second
                 sleep(ScreenInventory.WAIT_TIME * 1000);
                 currentScreenName = ScreenInventory.getCurrentScreenName();
@@ -5079,6 +5105,14 @@ LinearCommand.register(['searchInventory', 'registerNearbyStorage'], fun() {
     print('Storage is created.');
 });
 
+// ScreenInventory.WAIT_TIME modification 
+// command : /searchInventory setWaitTime 100
+LinearCommand.register(['searchInventory', 'setWaitTime', ['milliseconds', 'Integer']], fun(time) {
+    // use static function
+    ScreenInventory.WAIT_TIME = time / 1000;
+    // print out that wait time is set.
+    print('Wait time is set to '+ time);
+});
 
 // lets make command that moves from / to STORAGE variable. STORAGE is MergedInventory, it has moveTo, moveFrom functions that can replace moveToNearby, moveFromNearby.
 // lets make command that moves item from player inventory to STORAGE. we will use MergedInventory.moveTo function.
@@ -5294,7 +5328,7 @@ LinearCommand.register(['recipeManager', ['setRestriction'], ['boolean', 'Word',
 // lets make command that calls RecipeManager.resetSelectedRecipes() function. 
 // we will use selectRecipes <function> command.
 // command : recipeManager selectRecipes resetSelectedRecipes
-LinearCommand.register(['recipeManager', 'selectRecipes', 'resetSelectedRecipes'], fun() {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['resetSelectedRecipes']], fun() {
     // lets reset selected recipes.
     RecipeManager.resetSelectedRecipes();
     // lets print out result.
@@ -5303,7 +5337,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'resetSelectedRecipes'
 
 // lets make command that calls RecipeManager.emptyRecipes() function.
 // command : recipeManager selectRecipes emptyRecipes
-LinearCommand.register(['recipeManager', 'selectRecipes', 'emptyRecipes'], fun() {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['emptyRecipes']], fun() {
     // lets empty selected recipes.
     RecipeManager.emptyRecipes();
     // lets print out result.
@@ -5312,7 +5346,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'emptyRecipes'], fun()
 
 // lets make command that calls RecipeManager.addRecipeOfPlayer() function. We will name it 'addRecipeOfPlayer'.
 // command : recipeManager selectRecipes addRecipeOfPlayer
-LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfPlayer'], fun() {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['addRecipeOfPlayer']], fun() {
     // lets add recipe of player.
     RecipeManager.addRecipeOfPlayer();
     // lets print out result.
@@ -5321,7 +5355,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfPlayer'], 
 
 // lets make command that calls RecipeManager.addRecipeOfNearby() function. We will name it 'addRecipeOfNearby'.
 // command : recipeManager selectRecipes addRecipeOfNearby
-LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfNearby'], fun() {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['addRecipeOfNearby']], fun() {
     // lets add recipe of nearby.
     RecipeManager.addRecipeOfNearby();
     // lets print out result.
@@ -5330,7 +5364,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfNearby'], 
 
 // lets make command that calls RecipeManager.addRecipeOfItem(item : ItemStack) function. We will name it 'addRecipeOfItem'.
 // command : recipeManager selectRecipes addRecipeOfItem minecraft:stone
-LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfItem', ['item', 'ItemStack']], fun(item) {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['addRecipeOfItem'], ['item', 'ItemStack']], fun(item) {
     // lets add recipe of item.
     RecipeManager.addRecipeOfItem(item);
     // lets print out result.
@@ -5339,7 +5373,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOfItem', ['i
 
 // lets make command that calls RecipeManager.addRecipeOf(string : String) function. We will name it 'addRecipeOf'.
 // command : recipeManager selectRecipes addRecipeOf minecraft:stone
-LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOf', ['item', 'ItemStack']], fun(item) {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['addRecipeOf'], ['item', 'ItemStack']], fun(item) {
     // lets add recipe of item.
     RecipeManager.addRecipeOf(item.getFullId());
     // lets print out result.
@@ -5348,7 +5382,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipeOf', ['item'
 
 // lets make command that calls RecipeManager.addRecipe(recipe : Recipe) function. We will name it 'addRecipe'.
 // command : recipeManager selectRecipes addRecipe minecraft:stone
-LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipe', ['item', 'Recipe']], fun(item) {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['addRecipe'], ['item', 'RecipeId']], fun(item) {
     // lets add recipe of item.
     RecipeManager.addRecipe(item);
     // lets print out result.
@@ -5357,7 +5391,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'addRecipe', ['item', 
 
 // lets make command that calls RecipeManager.removeRecipe(recipe : Recipe) function. We will name it 'removeRecipe'.
 // command : recipeManager selectRecipes removeRecipe minecraft:stone
-LinearCommand.register(['recipeManager', 'selectRecipes', 'removeRecipe', ['item', 'Recipe', RecipeManager.suggestSelectedRecipe]], fun(item) {
+LinearCommand.register(['recipeManager', ['selectRecipes'], ['removeRecipe'], ['item', 'RecipeId', RecipeManager.suggestSelectedRecipe]], fun(item) {
     // lets remove recipe of item.
     RecipeManager.removeRecipe(item);
     // lets print out result.
@@ -5366,7 +5400,7 @@ LinearCommand.register(['recipeManager', 'selectRecipes', 'removeRecipe', ['item
 
 // lets save SELECTED_RECIPES to file.
 // command : recipeManager saveRecipes
-LinearCommand.register(['recipeManager', 'saveRecipes'], fun() {
+LinearCommand.register(['recipeManager', ['saveRecipes']], fun() {
     // lets save selected recipes.
     RecipeManager.saveRecipes();
     // lets print out result.
@@ -5375,7 +5409,7 @@ LinearCommand.register(['recipeManager', 'saveRecipes'], fun() {
 
 // lets load SELECTED_RECIPES from file.
 // command : recipeManager loadRecipes
-LinearCommand.register(['recipeManager', 'loadRecipes'], fun() {
+LinearCommand.register(['recipeManager', ['loadRecipes']], fun() {
     // lets load selected recipes.
     RecipeManager.loadRecipes();
     // lets print out result.
