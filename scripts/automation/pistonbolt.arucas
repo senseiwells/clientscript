@@ -1,389 +1,685 @@
 import * from Minecraft;
-client = MinecraftClient.getClient();
-player = client.getPlayer();
-world = client.getWorld();
-playerReach = 4.5;
-accurateBlockPlacement = false;
-carefulBreakSneak = false;
-messageHolder = new MessageHolder();
-taskInterval = 10; //10ms interval
-serverPing = 150;
-trustClient = true;
-tickCount = 2;
-//Hardcode sequences
-Mapping_Diagonal =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'sticky_piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
-Mapping_Straight =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
-Mapping_Straight_v2 = {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern', 8 : 'powered_rail'};
-NORTH = new Direction('north');
-SOUTH = new Direction('south');
-WEST = new Direction('west');
-EAST = new Direction('east');
-UP = new Direction('up');
-DOWN = new Direction('down');
+import Java from util.Internal;
+import LinearCommand from minecraft.CommandUtils;
+import DefaultSuggester from minecraft.CommandUtils;
+import * from minecraft.PosUtils;
+import * from minecraft.MinecraftUtils;
+// import InventoryUtil from minecraft.InventoryUtils;
 
-// Functions
-fun swapToItem(itemString){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+
+//InventoryUtil arucas
+import * from minecraft.MinecraftUtils;
+import * from util.Collections;
+import Assert from util.Auxilary;
+
+class InventoryUtil {
+    static var TOOLS = ['axe', 'shovel', 'pickaxe', 'hoe'];
+    static var debug = false;
+    static var selectedSlot = null;
+    static var preserveDurability = false;
+    static var pointer = 0;
+    static var hotbarSlotCache = {};
+    //class InventoryUtil does not offer static method, instead, it offers player-related options based on binded player entity
+    //Please never use setSeletedSlot outside! or, use sync() to refresh selected slot!
+    //This class is stable against server sync, will not suffer against server packets.
+    static fun sync() {
+        //Syncs selected slot and remove cached slot information
+        InventoryUtil.selectedSlot = Player.get().getCurrentSlot();
+        InventoryUtil.hotbarSlotCache = {};
+    }
+    static fun optionalSelectedSlot() {
+        //Get cached selected slot, or sync and get selected slot.
+        if (InventoryUtil.selectedSlot == null) {
+            InventoryUtil.selectedSlot = Player.get().getCurrentSlot();
+        }
+        return InventoryUtil.selectedSlot;
+    }
+    static fun isInHotbar(itemString : String) {
+        //Returns if item containing the string was in hotbar.
+        foreach(i : range(9)) {
+            if(Player.get().getItemForSlot(i + 36).getId().contains(itemString)) {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    static fun getCachedSlot(itemString : String) {
+        //'Get cached slot or allocate new slot.';
+        foreach (i : InventoryUtil.hotbarSlotCache.getKeys()) {
+            if (InventoryUtil.hotbarSlotCache.get(i) == itemString) {
+                return i;
+            }
+        }
+        ptr = InventoryUtil.updatePointer();
+        InventoryUtil.hotbarSlotCache.put(ptr, itemString);
+        return ptr;
+    }
+
+    static fun isCachedItem(itemString : String) {
+        //'Returns if item was in selected slot.';
+        selectedSlot = InventoryUtil.optionalSelectedSlot();
+        if (InventoryUtil.hotbarSlotCache.get(selectedSlot) == itemString) {
+            //may check if its all used
+            if (Player.get().getItemForSlot(selectedSlot + 36).getCount() == 0) {
+                InventoryUtil.sync();
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    static fun sendDebugMessage(string : String) {
+        if (InventoryUtil.debug) {
+            Player.get().message(string);
+        }
+    }
+    static fun swapToItem(itemString : String | ItemStack | Material) {
+        if (InventoryUtil.isCachedItem(itemString)) {
+            InventoryUtil.sendDebugMessage("Already had item " + itemString +" in current slot " + InventoryUtil.optionalSelectedSlot());
+            return true;
+        }
+        if (itemString == "air") {
+            InventoryUtil.swapToTool("pickaxe");
+            return true;
+        }
+        foreach(i : range(9)) {
+            if(Player.get().getItemForSlot(i + 36).getId() == itemString) {
+                InventoryUtil.setSelectedSlot(i);
+                InventoryUtil.sendDebugMessage("Changed to hotbar slot " + i + " for "+ itemString);
+                return true;
+            }
+        }
+        slot = Player.get().getSlotFor(MaterialUtil.of(itemString));
+        retVal = false;
+        if (slot == null) {
+            if (Player.get().getGamemode() == 'creative') {
+                InventoryUtil.sendDebugMessage("Clicked creative slot");
+                Player.get().clickCreativeStack(ItemStack.of(MaterialUtil.of(itemString)), 36 + InventoryUtil.optionalSelectedSlot());
+                InventoryUtil.setSelectedSlot(InventoryUtil.optionalSelectedSlot());
+                InventoryUtil.cacheItem(InventoryUtil.optionalSelectedSlot() - 36, itemString);
+                return true;
+            }
+        }
+        if (slot != null) {
+            if (0 <= slot-36 && slot-36  <= 8) {
+                InventoryUtil.setSelectedSlot(slot-36);
+                InventoryUtil.sendDebugMessage("Changed to hotbar slot " + (slot - 36) + " for "+ itemString);
+                InventoryUtil.cacheItem(slot - 36, itemString);
+                return true;
+            }
+            else {
+                Player.get().clickSlot(slot, InventoryUtil.getCachedSlot(itemString), 'swap');
+                InventoryUtil.setSelectedSlot(InventoryUtil.getCachedSlot(itemString));
+                InventoryUtil.sendDebugMessage("Swapped with slot " + slot + " and "+ InventoryUtil.getCachedSlot(itemString) + " for "+ itemString);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static fun setSelectedSlot(slotNum : Number) {
+        Assert.assert (slotNum >= 0 && slotNum < 9, 'Selected slot number should be between 0 and 8');
+        InventoryUtil.selectedSlot = slotNum;
+        Player.get().setSelectedSlot(slotNum);
+    }
+
+    // Swaps to pickaxe.
+    static fun swapToPickaxe() {
+        return InventoryUtil.swapToTool('pickaxe');
+    }
+    //toolSwitch
+    static fun toolSwitch(block : Block) {
+        speeds = {};
+        foreach (itemName : InventoryUtils.TOOLS) {
+            speeds.put(Player.get().getBlockBreakingSpeed(ItemStack.of(MaterialUtil.of('netherite_' + itemName)), block), itemName);
+        }
+        value = speeds.getKeys().sort()[len(speeds.getKeys())-1];
+        if (value < 1) {
+            return false;
+        }
+        return InventoryUtil.swapToTool(speeds.get(value));
+    }
+
+
+    static fun swapToTool(itemName : String) {
+        if (Player.get().getItemForSlot(InventoryUtil.optionalSelectedSlot() + 36).getId().contains(itemName)) {
+            if (InventoryUtil.internalPreserveTools(InventoryUtil.optionalSelectedSlot() + 36)) {
+                InventoryUtil.internalRemoveFromHotbar(InventoryUtil.optionalSelectedSlot());
+            }
+            else {
+                InventoryUtil.sendDebugMessage("Already had "+itemName+" in current slot");
+                return true;
+            }
+        }
+        slot = null;
+        materials = InventoryUtil.getToolFromString(itemName);
+        foreach (items : materials) {
+            foreach(i : range(9)) {
+                if(Player.get().getItemForSlot(i + 36).getMaterial() == items && !InventoryUtil.internalPreserveTools(i)) {
+                    InventoryUtil.setSelectedSlot(i);
+                    InventoryUtil.sendDebugMessage("Changed to slot " + i + " for "+ itemName);
+                    return true;
+                }
+            }
+        }
+        found = null;
+        foreach (items : materials) {
+            slots = Player.get().getAllSlotsFor(ItemStack.of(items));
+            foreach (slot : slots) {
+                if (slot != null &&!InventoryUtil.internalPreserveTools(slot)) {
+                    found = slot;
+                    break;
+                }
+            }
+            if (found != null) {
+                break;
+            }
+        }
+        slot = found;
+        if (slot != null) {
+            if (0 <= slot-36 && slot-36  <= 8) {
+                InventoryUtil.sendDebugMessage("Selected slot "+ (slot - 36) + " for "+ itemName);
+                InventoryUtil.setSelectedSlot(slot-36);
+                return true;
+            }
+            else {
+                Player.get().clickSlot(slot, InventoryUtil.getCachedSlot(itemName), 'swap');
+                InventoryUtil.setSelectedSlot(InventoryUtil.getCachedSlot(itemName));
+                InventoryUtil.sendDebugMessage("Swapped with slot "+ slot+ " and "+ InventoryUtil.getCachedSlot(itemName) + " for "+ itemName);
+                return true;
+            }
+        }
+        if (slot == null) {
+            if (Player.get().getGamemode() == 'creative') {
+                preslot = Player.get().getSwappableHotbarSlot();
+                Player.get().clickCreativeStack(ItemStack.of(MaterialUtil.of("netherite_" + itemName)), 36 + preslot);
+                InventoryUtil.setSelectedSlot(preslot);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static fun checkItem(itemString : String) {
+        //'Checks if player has item or can take item'
+        if (Player.get().getGamemode() == 'creative') {
+            return true;
+        }
+        if (Player.get().getItemForSlot(InventoryUtil.optionalSelectedSlot() + 36).getId() == itemString) {
+            return true;
+        }
+        foreach(i : range(9)) {
+            if(Player.get().getItemForSlot(i + 36).getId() == itemString) {
+                return true;
+            }
+        }
+        slot = Player.get().getSlotFor(MaterialUtil.of(itemString));
+        return slot != null;
+    }
+
+    static fun checkTool(args...) {
+        //'Checks if player has item or can take item'
+        toolName = 'pickaxe';
+        if (len(args) > 0){
+            toolName = args.get(0);
+        }
+        if(Player.get().getGamemode() == 'creative') {
+            return true;
+        }
+        if (Player.get().getItemForSlot(InventoryUtil.optionalSelectedSlot() + 36).getId().contains(toolName)) {
+            return true;
+        }
+        slot = null;
+        foreach (mats : InventoryUtil.getToolFromString(toolName)) {
+            slot = Player.get().getSlotFor(mats);
+            if (slot != null) {
+                break;
+            }
+        }
+        return slot != null;
+    }
+
+    static fun assertItem(itemString : String) {
+        //'Throws assertion error when item swap fails'
+        InventoryUtil.swapToItem(itemString);
+        Assert.assert(Player.get().getItemForSlot(InventoryUtil.optionalSelectedSlot() + 36).getId() == itemString, "Assertion failed : player is not holding "+ itemString + "!") ;
         return true;
     }
-	if (itemString == "air") {
-		swapToPickaxe();
-		return false;}
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId() == itemString){
-			player.setSelectedSlot(i);
-			return true;
-		}
-	}
-	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-	retVal = false;
-	if (slot == null) {return false;}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    player.setSelectedSlot(slot-36);
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			player.swapPlayerSlotWithHotbar(slot);
-			player.setSelectedSlot(preslot);
-			return true;
-		}
-	}
-	return null;
-}
-fun checkItem(itemString){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString){
+
+    static fun assertTool(args...) {
+        //'Tries swapping to tool, throws assertion error when it fails'
+        toolName = 'pickaxe';
+        if (len(args) > 0){
+            toolName = args.get(0);
+        }
+        InventoryUtil.swapToTool(toolName);
+        Assert.assert(Player.get().getItemForSlot(InventoryUtil.optionalSelectedSlot() + 36).getId().contains(toolName), "Assertion failed : player is not holding "+ toolName + "!");
         return true;
     }
-	foreach(i : [0,1,2,3,4,5,6,7,8]){
-		if(player.getItemForPlayerSlot(i).getId() == itemString){
-			return true;
-		}
-	}
-	slot = player.getSlotFor(ItemStack.of(Material.of(itemString)));
-	retVal = false;
-	if (slot == null) {return false;}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			return true;
-		}
-	}
-	messageHolder.sendMessage("Can't find "+ itemString+" in inventory");
-	return null;
-}
-// Swaps to pickaxe.
-fun swapToPickaxe(){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
-        return true;
+
+    /**
+    *   static functions for internal uses.
+    */
+
+    static fun getToolFromString(itemName : String) {
+         switch (itemName) {
+            case 'shovel' -> return MaterialUtils.getShovels();
+            case 'pickaxe' -> return MaterialUtils.getPickaxes();
+            case 'axe' -> return MaterialUtils.getAxes();
+            case 'hoe' -> return MaterialUtils.getHoes();
+        }
+        return null;
     }
-	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
-	if (slot == null) {
-		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
-	}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    player.setSelectedSlot(slot-36);
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			player.swapPlayerSlotWithHotbar(slot);
-			player.setSelectedSlot(preslot);
-			return true;
-		}
-	}
-	return false;
-}
-fun checkPickaxe(){
-    if (player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains("pickaxe")){
-        return true;
+
+    static fun internalPreserveTools(slotNum : Number) {
+        //intended for private access as carpet-stype static functions
+        if (InventoryUtil.preserveDurability) {
+            stack = Player.get().getItemForSlot(slotNum);
+            dur = stack.getDurability();
+            if (dur == 0 || stack.getNbt().get('Damage') == null) {
+                return false;
+            }
+            return stack.getNbt().get('Damage') + 7 >= dur;
+        }
+        return false;
     }
-	slot = player.getSlotFor(ItemStack.of(Material.of("diamond_pickaxe")));
-	if (slot == null) {
-		slot = player.getSlotFor(ItemStack.of(Material.of("netherite_pickaxe")));
-	}
-	if (slot != null) {
-		if (0 <= slot-36 && slot-36  <= 8) {
-		    return true;
-		}
-		else {
-			preslot = player.getSwappableHotbarSlot();
-			return true;
-		}
-	}
-	messageHolder.sendMessage("Can't find pickaxe in inventory");
-	return false;
-}
-fun assertItem(itemString){
-    swapToItem(itemString);
-    return player.getItemForSlot(player.getCurrentSlot() + 36).getId() == itemString;
+
+    static fun internalRemoveFromHotbar(hotbarNum : Number) {
+        foreach (i : range(9, 36)) {
+            if (Player.get().isPlayerSlot(i)) {
+                if (InventoryUtil.internalPreserveTools(i)) {
+                    continue;
+                }
+                Player.get().clickSlot(i, hotbarNum, 'swap');
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static fun cacheItem(slotNum : Number, itemName : String) {
+        InventoryUtil.hotbarSlotCache.put(slotNum, itemName);
+    }
+
+
+    static fun updatePointer() {
+        if (InventoryUtil.hotbarSlotCache.get(InventoryUtil.pointer) == null) {
+            return InventoryUtil.pointer;
+        }
+        if (InventoryUtil.pointer == 8) {
+            InventoryUtil.pointer = 0;
+            return 0;
+        }
+        InventoryUtil.pointer++;
+        return InventoryUtil.pointer;
+    }
 }
 
-fun assertTool(){
-    swapToPickaxe();
-    return player.getItemForSlot(player.getCurrentSlot() + 36).getId().contains('pickaxe');
-}
-fun breakBlock(pos, requireSneak){
-	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).isFluid() || world.isAir(pos)) {return;}
-	if (world.getBlockAt(pos).getHardness() == 0) {player.attackBlock(pos,'up');sleep(20);return;}
-	if (!world.getBlockAt(pos).isReplaceable() ) {
-	assertTool();
-	while(!world.getBlockAt(pos).isReplaceable()) {
-		if (requireSneak) {player.setSneaking(true);}
-		player.updateBreakingBlock(pos);
-		if(world.getBlockAt(pos).isReplaceable()){break;}
-		sleep(50);
-	}}
-}
-fun getReverse(dir) {
-    dir = dir.uppercase();
-    if (dir == "UP") {
-        return "DOWN";
+fun tryPredicateAndMerge(iterable: Iterable, predicate, modifyFunction){
+    retVal = [];
+    foreach (i : iterable){
+        defaultVal = false;
+        try {
+            defaultVal = predicate(i);
+        } catch (ignored) {
+            continue;
+        }
+        if (defaultVal) retVal.append(modifyFunction(i));
     }
-    if (dir == "DOWN") {
-        return "UP";
-    }
-    if (dir == "EAST") {
-        return "WEST";
-    }
-    if (dir == "WEST") {
-        return "EAST";
-    }
-    if (dir == "NORTH") {
-        return "SOUTH";
-    }
-    if (dir == "SOUTH") {
-        return "NORTH";
-    }
-    return null;
+    return retVal;
 }
 
-fun applyCarpetProtocol(x,y,z,direction){
-    if (direction == null) {return [x,y,z];}
-	dirId = getDirectionId(direction);
-	return [x+2*dirId + 2, y, z];
-}
-fun getDirectionId(dir) {
-    dir = dir.fromString.uppercase();
-    if (dir == "UP") {
-        return 1;
-    }
-    if (dir == "DOWN") {
-        return 0;
-    }
-    if (dir == "EAST") {
-        return 5;
-    }
-    if (dir == "WEST") {
-        return 4;
-    }
-    if (dir == "NORTH") {
-        return 2;
-    }
-    if (dir == "SOUTH") {
-        return 3;
-    }
-    return null;
-}
-fun placeTorch(blockPos, itemString){
+class MaterialUtil {
 
-	assertItem(itemString);
-	if (assertItem(itemString) || trustClient){
-	    x = blockPos.getX();
-	    y = blockPos.getY();
-	    z = blockPos.getZ();
-	    player.interactBlock(x,y,z,"up",x,y-1,z,false);
-	    return true;
-	}
-	return false;
-}
-fun placeDirectionBlock(blockPos,itemString,direction){
-    if(itemString.contains('torch')){
-        return placeTorch(blockPos, itemString);
+    static var cache_material_mapping = {};
+    static fun of(materialName){
+        if (MaterialUtil.cache_material_mapping.containsKey(materialName)) return MaterialUtil.cache_material_mapping.get(materialName);
+        try {
+            return Material.of(materialName);
+        }
+        catch (e) {
+            matches = tryPredicateAndMerge(Material.ALL, fun(obj) {return obj.getId() == materialName;}, fun(obj) {return obj.getFullId();});
+            foreach (keys : matches) {
+                //return first
+                MaterialUtil.cache_material_mapping.put(materialName, Material.of(keys));
+                return Material.of(keys);
+            }
+            //fallback
+        }
+        throw new Error('Cannot parse ' + materialName +' into Material!');
     }
-    fy = 0;
-    fp = 0;
-    lookRefdir = 'north';
-
-	if (direction != null) {
-	    dir = direction.fromString.uppercase();
-	    lookRefdir = dir;
-	    if (itemString.contains("piston") || itemString.contains("repeater")){
-	    	lookRefdir = getReverse(dir); //well actually, we might need to have testing function
-	    }
-	    fy = player.getYaw();
-	    fp = player.getPitch();
-	    if (lookRefdir  == "UP") {
-	    	fy = 0;
-	    	fp = -90;
-	    }
-	    else if (lookRefdir  == "DOWN") {
-	    	fy = 0;
-	    	fp = 90;
-	    }
-	    else if (lookRefdir  == "EAST") {
-	    	fy = -90;
-	    	fp = 0;
-	    }
-	    else if (lookRefdir  == "WEST") {
-	    	fy = 90;
-	    	fp = 0;
-	    }
-	    else if (lookRefdir  == "NORTH") {
-	    	fy = 180;
-	    	fp = 0;
-	    }
-	    else if (lookRefdir  == "SOUTH") {
-	    	fy = 0;
-	    	fp = 0;
-	    }
-	}
-	assertItem(itemString);
-	if (assertItem(itemString) || trustClient){
-	    x = blockPos.getX();
-	    y = blockPos.getY();
-	    z = blockPos.getZ();
-	    py = y;
-	    if ((direction != null && !accurateBlockPlacement) || itemString.contains("rail")) {
-	    	player.fakeLook(fy,fp,lookRefdir,1);
-	    	sleep(50);
-	    	player.interactBlock(x,py,z,lookRefdir,x,y,z,false);
-	    	if (itemString.contains("rail")){
-	    	    sleep(50);
-	    	}
-	    } else if (direction != null && accurateBlockPlacement){
-	    	carpetVec = applyCarpetProtocol(x,y,z,direction);
-	    	hx = carpetVec.get(0);
-	    	hy = carpetVec.get(1);
-	    	hz = carpetVec.get(2);
-	    	player.interactBlock(hx,hy,hz,direction.fromString,x,py,z,true);
-	    }
-	    else {
-            player.interactBlock(x,y,z,"north",x,y,z,false);
-	    }
-	    return true;
-	}
-	else {
-	    return false;
-	}
 }
 
+// End of InventoryUtil
+
+cache_material_mapping = {};
+getFailSafeMaterial = fun (materialName){
+    if (cache_material_mapping.containsKey(materialName)) return cache_material_mapping.get(materialName);
+    try {
+        return Material.of(materialName);
+    }
+    catch (e) {
+        matches = tryPredicateAndMerge(Material.ALL, fun(obj) {return obj.getId() == materialName;}, fun(obj) {return obj.getFullId();});
+        foreach (keys : matches) {
+            //return first
+            cache_material_mapping.put(materialName, Material.of(keys));
+            return Material.of(keys);
+        }
+        //fallback
+    }
+    throw new Error('Cannot parse ' + materialName +' into Material!');
+};
 //classes
-class DirectionHandler{
-    //we can only handle one direction at tick
-    //implements 50-ms container that
+class MovementUtil{
+    var player;
+    MovementUtil(player){
+        //this binds player
+        this.player = player;
+    }
+    fun move(pos : Pos){
+        playerPos = player.getPos();
+        player.lookAtPos(pos);
+        if (!moveTasks.contains(pos.toString())){
+            moveTasks.add(pos.toString());
+            print(pos.toString());
+            new Task().then(fun (){while (!pos.isNear(player)){player.setWalking(true); sleep(taskInterval);player.setWalking(false);}}).run();
+        }
+    }
+    fun forward(pos : Pos){
+        playerPos = player.getPos();
+        if (!moveTasks.contains(pos.toString())){
+            moveTasks.add(pos.toString());
+            print(pos.toString());
+            new Task().then(fun (){while (!pos.isNear(player)){player.setWalking(true); sleep(taskInterval);player.setWalking(false);} }).run();
+        }
+    }
+}
+class DefaultedMap {
+    var map;
+    var defaultValue = null;
+    DefaultedMap(items){
+        this.map = {};
+        foreach (item : items){
+            this.map.put(item, this.defaultValue);
+        }
+    }
+    DefaultedMap(items, defaultValue){
+        this.map = {};
+        this.defaultValue = defaultValue;
+        foreach (item : items){
+            this.map.put(item, this.defaultValue);
+        }
+    }
+    fun addAll(values){
+        if (Type.of(values).getName() == 'List'){
+            foreach (item : values){
+                this.map.put(item, this.defaultValue);
+            }
+        }
+        else {
+            this.map.addAll(values);
+        }
+    }
+    fun getValues(){
+        return this.map.getValues();
+    }
+    fun containsKey(key){
+        return this.map.conatinsKey();
+    }
+    fun putAll(other){
+        this.map.putAll(other);
+    }
+    fun addList(other){
+        this.map.putAll(new DefaultedMap(other).map);
+    }
+    fun get(key){
+        return this.map.get(key);
+    }
+    fun isEmpty(){
+        return this.map.isEmpty();
+    }
+    fun clear(){
+        this.map.clear();
+    }
+    fun toString(){
+        return this.map.toString();
+    }
+    fun getKeys(){
+        return this.map.getKeys();
+    }
+    fun putIfAbsent(key, value){
+        return this.map.putIfAbsent(key, value);
+    }
+    fun remove(key){
+        if (key == null){
+            return null;
+        }
+        return this.map.remove(key);
+    }
+    fun put(key, value){
+        return this.map.put(key, value);
+    }
+    fun put(key){
+        return this.map.put(key, this.defaultValue);
+    }
+    fun poll(){
+        if (!this.isEmpty())
+            return this.map.getKeys().get(0);
+    }
 }
 class MessageHolder{
     //message holding class that prevents spamming same message
     var stringSet;
+    var debugFlag;
+    var previousMessage ;
+    var actionbar = false;
     MessageHolder(){
         this.stringSet = Set.of();
     }
     fun sendMessage(message){
+        if(this.previousMessage == message){
+            return;
+        }
+        if (this.actionbar){
+            player.messageActionBar(message);
+        }
+        else {
+            player.message(message);
+        }
+        this.stringSet.add(message);
+        this.previousMessage = message;
+    }
+    fun sendMessageUnique(message){
         if (this.stringSet.contains(message)){
             return;
         }
-        player.message(message);
+        if (this.debugFlag && !hideMessage){
+            this.sendMessage(message);
+        }
         this.stringSet.add(message);
     }
     fun sendMessageUnchecked(message){
-        player.message(message);
+        if (this.actionbar){
+            player.messageActionBar(message);
+        }
+        else {
+            player.message(message);
+        }
         this.stringSet.add(message);
     }
+    fun sendDebugMessage(message){
+        if (this.debugFlag && !hideMessage){
+            this.sendMessage(message);
+        }
+    }
+
+    fun sendActionBar(message){
+        player.messageActionBar(message);
+    }
 }
-class Task {
+class ClickScheduledTask {
+    //instantly calculate difference and click
+    var blockPos;
+    var ignoreDistance = false;
+    var wantedStateProperty = {}; //Noteblock : note, repeater - delay, comparator - mode, redstone dust : east(for example)
+    ClickScheduledTask(blockPos, stateProperty){
+        this.blockPos = blockPos;
+        this.wantedStateProperty = stateProperty; //Map of properties
+    }
+    ClickScheduledTask(blockPos){
+        this.blockPos = blockPos;
+        this.wantedStateProperty = {'delay' : 1, 'mode' : 'compare', 'east' : 'side', 'note' : 0}; //Map of properties
+    }
+    fun repeaterStatus(){
+        clientDelay = world.getBlockAt(this.blockPos).getBlockProperties().get('delay');
+        if(clientDelay == null){
+            return 0;
+        }
+        messageHolder.sendDebugMessage(""+ this.blockPos + ' has wrong delay, could be desync?');
+        return Math.mod(this.wantedStateProperty.get('delay') - clientDelay, 4);
+    }
+    fun comparatorStatus(){
+        clientMode = world.getBlockAt(this.blockPos).getBlockProperties().get('mode');
+        if (clientMode == null || clientMode == this.wantedStateProperty.get('mode')){
+            return 0;
+        }
+        messageHolder.sendDebugMessage(""+ this.blockPos + ' has wrong mode, could be desync?');
+        return 1;
+    }
+    fun dustStatus(){
+        clientConnected = world.getBlockAt(this.blockPos).getBlockProperties().get('east');
+        if (clientConnected == null || clientConnected == this.wantedStateProperty.get('east')){
+            return 0;
+        }
+        messageHolder.sendDebugMessage(""+ this.blockPos + ' has wrong dust shape, could be desync?');
+        return 1;
+    }
+    fun noteBlockStatus(){
+        clientNote = world.getBlockAt(this.blockPos).getBlockProperties().get('note');
+        if(clientNote == null){
+            return 0;
+        }
+        messageHolder.sendDebugMessage(""+ this.blockPos + ' has wrong note, could be desync?');
+        return Math.mod(this.wantedStateProperty.get('note') - clientNote, 25);
+    }
+    fun fix(){
+        clickTimes = this.repeaterStatus() + this.comparatorStatus() + this.dustStatus() + this.noteBlockStatus();
+        for (i = 0; i < clickTimes; i++) {
+            player.interactBlock(this.blockPos, "up");
+            sleep(16);
+        }
+
+    }
+}
+class ScheduledTask {
     // task that has what to do, break / item with directions
     var pos;
     var shouldBreak;
     var item;
     var block; //item.asBlock()
-    var facing;
+    var facing = Direction.NONE;
     var itemString;
     var optional = 0;
-    var connectedTask = null;
+    var connectedScheduledTask = null;
     var isExecuted = false;
-    Task(pos, itemName, direction){
+    var withBlockState;
+    var immediate = false;
+    var ignoreDistance = false;
+    var predicate = fun (){return true;};
+    ScheduledTask(pos, itemName, direction){
         this.pos = pos;
-        this.shouldBreak = false;
-        this.item = ItemStack.of(Material.of(itemName));
+        this.shouldBreak = false;//ItemStack.of(Material.of(itemName)).asBlock();
+        this.item = ItemStack.of(getFailSafeMaterial(itemName));
         this.block = this.item.asBlock();
         this.itemString = itemName;
-        this.facing = direction;
+        if (direction != null)
+            this.facing = direction;
     }
-    Task(pos){
+    ScheduledTask(pos){
         this.pos = pos;
         this.shouldBreak = true;
         this.item = null;
-        this.facing = null;
+        this.facing = Direction.NONE;
     }
-    Task(pos, b, i, f){
+    ScheduledTask(pos, b, i, f){
         this.pos = pos;
         this.shouldBreak = b;
-        if (Type.of(i).getName() == 'String'){
-            i = ItemStack.of(Material.of(i));
+        if (!b){
+            if (Type.of(i).getName() == 'String'){
+                i = ItemStack.of(getFailSafeMaterial(i));
+            }
+            this.item = i;
+            this.itemString = this.item.getId();
+            this.block =  this.item.asBlock();
         }
-        this.item = i;
-        this.itemString = i.getId();
-        this.block = i.asBlock();
-        this.facing = f;
+        if (f != null)
+            this.facing = f;
     }
-    Task(pos, b, i, f, optional){
+    ScheduledTask(pos, b, i, f, optional){
         this.pos = pos;
         this.shouldBreak = b;
-        this.item = i;
-        this.itemString = i.getId();
-        this.block = i.asBlock();
+        if (!b){
+            this.item = i;
+            this.itemString = i.getId();
+            this.block = i.asBlock();
+        }
         this.facing = f;
         this.optional = optional;
     }
     fun add(otherPos){
-        return new Task(this.pos.add(otherPos), this.shouldBreak, this.item, this.facing);
+        return new ScheduledTask(this.pos.add(otherPos), this.shouldBreak, this.item, this.facing);
+    }
+    fun hash(){
+        return '' + this.pos + this.shouldBreak + this.itemString + this.facing;
     }
     fun isDone(){
     // null returns for nothing required
-        pos = this.pos.asPos();
-        if (this.shouldBreak && world.getBlockAt(pos).isReplaceable()){
+        pos = this.pos;
+        clientBlock = world.getBlockAt(pos);
+        if (this.shouldBreak && clientBlock.isReplaceable()){
             //break task, finished
+            this.isExecuted = true;
             return null;
         }
-        else if (this.shouldBreak && !world.getBlockAt(pos).isReplaceable()) {
+        else if (this.shouldBreak && !clientBlock.isReplaceable()) {
             if (this.isExecuted && trustClient){
                 return null;
             }
             return this;
         }
-        else if (!this.shouldBreak && world.getBlockAt(pos).isReplaceable()){
+        else if (!this.shouldBreak && clientBlock.isReplaceable()){
             //place task, but empty
             if (this.isExecuted && trustClient){
                 return null;
             }
             return this;
         }
-        state = world.getBlockAt(pos);
+        state = clientBlock;
         if (state.getId() != this.block.getId()){
             //wall torch exceptions
             if (state.getId().contains('wall')){
+                this.isExecuted = true;
                 return null;
             }
-            if (this.connectedTask != null && trustClient && this.connectedTask.isExecuted){
+            if (this.connectedScheduledTask != null && trustClient && this.connectedScheduledTask.isExecuted){
                 return null;
             }
             //place task, but break first
-            this.connectedTask = new Task(this.pos);
-            return this.connectedTask;
+            this.connectedScheduledTask = new ScheduledTask(this.pos);
+            return this.connectedScheduledTask;
         }
         //if (this.facing != null && state.getBlockProperties().get('facing') != this.facing){
-        //    return new Task(this.pos);
+        //    return new ScheduledTask(this.pos);
         //}
         return null;
     }
     fun internalAssertItem(){
         if (this.shouldBreak){
+            if (isBlockInstantBreakable(this.pos)){
+                return true;
+            }
             return assertTool();
         }
         return assertItem(this.itemString);
@@ -395,49 +691,359 @@ class Task {
         return checkItem(this.itemString);
     }
     fun internalCanProcess(){
-        if (this.pos.isNear(player)){
+        if (this.pos.isWithin(player, playerReach) || this.ignoreDistance){
          if (trustClient || this.internalAssertItem())
             return true;
         }
         return false;
         //returns if player has item or tool and reach
     }
+    fun isAvailable(){
+        return (this.ignoreDistance || this.pos.isWithin(player, playerReach) ) && this.checkInventory() && (this.shouldBreak || requiredOffsetCheck(this.pos, this.itemString, this.facing)) ;
+    }
+    fun isDistanceInvalid(){
+        return this.checkInventory() && (this.shouldBreak || requiredOffsetCheck(this.pos, this.itemString, this.facing)) && !this.ignoreDistance && !this.pos.isWithin(player, playerReach);
+    }
+    fun findReason(){
+        if (!this.pos.isWithin(player, playerReach)){
+            return "Position is not near to player pos " + player.getPos() +" " + this.pos;
+        }
+        if (!this.checkInventory()){
+            return "Does not have item";
+        }
+        if (!requiredOffsetCheck(this.pos, this.itemString, this.facing)){
+            return "can't place block at pos "+ this.pos;
+        }
+        return "available";
+    }
     fun process(){
     // checks, returns if processed
         if (this.internalCanProcess()){
-            sleep(taskInterval);
+            if(!this.isImmediate()){
+                sleep(taskInterval);
+            }
+            else {
+                sleep(immediateInterval);
+            }
+            if (!hideMessage)
+                messageHolder.sendDebugMessage(this.formatted());
             if (this.shouldBreak){
-                breakBlock(this.pos.asPos(), carefulBreakSneak);
-                isExecuted = true;
+                assertTool();
+                _ = breakBlock(this.pos, carefulBreakSneak);
+                this.isExecuted = true;
+                messageHolder.sendDebugMessage(this.formattedSuccess());
                 return true;
             }
-            messageHolder.sendMessage(this.formatted());
-            result = placeDirectionBlock(this.pos.asPos(),this.itemString,this.facing);
+            else {
+                if (this.itemString == null){
+                    throw new Error('itemString was null' + this.pos);
+                }
+            }
+            result = placeDirectionBlock(this.pos,this.itemString,this.facing, this.isImmediate());
             if (result){
-                isExecuted = true;
+                this.isExecuted = true;
+                messageHolder.sendDebugMessage(this.formattedSuccess());
                 return true;
             }
             else {
                 messageHolder.sendMessage(this.formattedError());
             }
+        }
+        else {
+            messageHolder.sendMessage(this.formattedError() + "Reason : not available");
+        }
+        return false;
+    }
+    fun execute(){
+    //direct excution.
+        return this.finish();
+    }
+    fun executeOrElse(){
+        if (this.internalCanProcess()){
+            this.process();
+        }
+        else {
+            messageHolder.sendMessage(this.findReason());
+        }
+    }
+    fun finish(){
+        while (true){
+            if (this.isExecuted){
+                return;
+            }
+            messageHolder.sendMessageUnique(this.formatted());
+            pendingScheduledTask = this.isDone();
+            if (pendingScheduledTask != null){
+                if (!pendingScheduledTask.checkInventory()){
+                    messageHolder.sendMessage(pendingScheduledTask.formattedError());
+                    break;
+                }
+                result = pendingScheduledTask.process();
+                if (result){
+                    if (trustClient){
+                        if (this != pendingScheduledTask){
+                            if (!pendingScheduledTask.checkInventory()){
+                            //No inventory item
+                                messageHolder.sendMessage(this.formattedError());
+                                break;
+                            }
+                            this.process();
+                        }
+                        if (this.isDone() == null){
+                            break;
+                        }
+                        else {
+                            this.isDone().process();
+                            break;
+                        }
+                    }
+                    else if (!this.immediate){
+                        sleep(serverPing);
+                    }
 
+                }
+            }
+            //null
+            else {
+                break;
+            }
+        }
+    }
+    fun isImmediate(){
+        return this.immediate;
+    }
+    fun setImmediate(bool){
+        this.immediate = bool;
+    }
+    fun formattedError(){
+        if (this.shouldBreak){
+            return 'failed to break block at '+ this.pos;
+        }
+        return 'failed to place ' + this.itemString + ' at ' + this.pos;
+    }
+    fun formatted(){
+        if (this.shouldBreak){
+            return 'break block at '+ this.pos;
+        }
+        return 'place ' + this.itemString + ' at ' + this.pos;
+    }
+    fun formattedSuccess(){
+        if (this.shouldBreak){
+            return 'broke block at '+ this.pos+ ' at' + getMilliTime();
+        }
+        return 'placed ' + this.itemString + ' at ' + this.pos+ ' at' + getMilliTime();
+    }
+    fun copy(){
+        return new ScheduledTask(this.pos.copy(), this.shouldBreak, this.item, this.facing, this.optional + 1);
+    }
+    fun executeUnchecked(){
+        if (this.shouldBreak){
+            assertTool();
+            breakBlock(this.pos, carefulBreakSneak);
+            this.isExecuted = true;
+        }
+        else {
+            placeDirectionBlock(this.pos,this.itemString,this.facing, true);
+        }
+        messageHolder.sendDebugMessage(this.formattedSuccess());
+        //print(this.formattedSuccess());
+        return true;
+    }
+}
+class FakeLookWaitingScheduledTask{
+    var fy;
+    var fp;
+    var pos = null;
+    var direction = Direction.NONE;
+    var predicate = fun(){return true;};
+    var immediate = true;
+    var isExecuted = false;
+    var ignoreDistance = true;
+    FakeLookWaitingScheduledTask(fy, fp, direction, predicate){
+        this.fy = fy;
+        this.fp = fp;
+        this.direction = direction;
+        this.predicate = predicate;
+    }
+    fun isDone(){
+        if (this.isExecuted){
+            return null;
+        }
+        return this;
+    }
+    fun internalCanProcess(){
+        return this.predicate();
+    }
+    fun isAvailable(){
+        return this.predicate();
+    }
+    fun process(){
+        if (this.internalCanProcess()){
+            messageHolder.sendDebugMessage('fake look ' + this.direction.getName());
+            player.fakeLook(this.fy, this.fp, this.direction.getName(), 8);
+            this.isExecuted = true;
+            return true;
+        }
+        return false;
+    }
+    fun finish(){
+        return this.process();
+    }
+    fun isImmediate(){
+        return this.immediate;
+    }
+    fun formatted(){
+        return 'Fake look '+ this.direction.getName();
+    }
+}
+
+class WaitingScheduledTask {
+    // ScheduledTask with predicate check to execute, such as block observe
+    var pos;
+    var shouldBreak;
+    var item;
+    var block; //item.asBlock()
+    var facing = Direction.NONE;
+    var itemString;
+    var optional = 0;
+    var connectedScheduledTask = null;
+    var isExecuted = false;
+    var withBlockState;
+    var predicate = fun (){return true;};
+    var immediate = false;
+    var ignoreDistance = false;
+    WaitingScheduledTask(pos, itemName, direction, predicate){
+        this.pos = pos;
+        this.shouldBreak = false;
+        this.item = ItemStack.of(getFailSafeMaterial(itemName));
+        this.block = this.item.asBlock();
+        this.itemString = itemName;
+        this.facing = direction;
+        this.predicate = predicate;
+    }
+    WaitingScheduledTask(pos, predicate){
+        this.pos = pos;
+        this.shouldBreak = true;
+        this.item = null;
+        this.facing = Direction.NONE;
+        this.predicate = predicate;
+    }
+    WaitingScheduledTask(pos, b, i, f, predicate){
+        this.pos = pos;
+        this.shouldBreak = b;
+        if (Type.of(i).getName() == 'String'){
+            i = ItemStack.of(getFailSafeMaterial(i));
+        }
+        this.item = i;
+        this.itemString = i.getId();
+        this.block = i.asBlock();
+        this.facing = f;
+        this.predicate = predicate;
+    }
+    WaitingScheduledTask(pos, b, i, f,predicate, optional){
+        this.pos = pos;
+        this.shouldBreak = b;
+        this.item = i;
+        this.itemString = i.getId();
+        this.block = i.asBlock();
+        this.facing = f;
+        this.optional = optional;
+        this.predicate = predicate;
+    }
+    fun isImmediate(){
+        return this.immediate;
+    }
+    fun setImmediate(bool){
+        this.immediate = bool;
+    }
+    fun add(otherPos){
+        return new WaitingScheduledTask(this.pos.add(otherPos), this.shouldBreak, this.item, this.facing, this.predicate);
+    }
+    fun hash(){
+        return '' + this.pos + this.shouldBreak + this.itemString + this.facing;
+    }
+    fun isDone(){
+    // null returns for nothing required
+        if(this.isExecuted){
+            return null;
+        }
+        return this;
+    }
+    fun internalAssertItem(){
+        if (this.shouldBreak){
+            if (isBlockInstantBreakable(this.pos)){
+                return true;
+            }
+            return assertTool();
+        }
+        return assertItem(this.itemString);
+    }
+    fun checkInventory(){
+        if (this.shouldBreak){
+            return checkPickaxe();
+        }
+        return checkItem(this.itemString);
+    }
+    fun internalCanProcess(){
+        if ((this.pos.distanceTo(player.getPos()) <= playerReach || this.ignoreDistance) && this.predicate()){
+         if (trustClient || this.internalAssertItem())
+            return true;
+        }
+        return false;
+        //returns if player has item or tool and reach
+    }
+    fun isAvailable(){
+        //external access
+        if (this.isImmediate()){
+            return this.predicate();
+        }
+        return (this.pos.distanceTo(player.getPos()) <= playerReach || this.ignoreDistance) && this.checkInventory() && (this.shouldBreak || requiredOffsetCheck(this.pos, this.itemString, this.facing)) && this.predicate() ;
+    }
+    fun process(){
+    // checks, returns if processed
+        if (this.internalCanProcess()){
+            if(!trustClient){
+                this.internalAssertItem();
+            }
+            if (!this.immediate){
+                sleep(taskInterval);
+            }
+            else {
+                sleep(immediateInterval);
+            }
+            messageHolder.sendDebugMessage(this.formatted());
+            if (this.shouldBreak){
+                breakBlock(this.pos, carefulBreakSneak);
+                this.isExecuted = true;
+                messageHolder.sendDebugMessage(this.formattedSuccess());
+                return true;
+            }
+            result = placeDirectionBlock(this.pos,this.itemString, this.facing, this.isImmediate());
+            if (result){
+                this.isExecuted = true;
+                messageHolder.sendDebugMessage(this.formattedSuccess());
+                return true;
+            }
+            else {
+                messageHolder.sendMessage(this.formattedError());
+            }
         }
         return false;
     }
     fun finish(){
         while (true){
-        messageHolder.sendMessage(this.formatted());
-            pendingTask = this.isDone();
-            if (pendingTask != null){
-                if (!pendingTask.checkInventory()){
-                    messageHolder.sendMessage(pendingTask.formattedError());
+            messageHolder.sendDebugMessage(this.formatted());
+            pendingScheduledTask = this.isDone();
+            if (pendingScheduledTask != null){
+                if (!pendingScheduledTask.checkInventory()){
+                    messageHolder.sendMessage(pendingScheduledTask.formattedError());
                     break;
                 }
-                result = pendingTask.process();
+                result = pendingScheduledTask.process();
                 if (result){
                     if (trustClient){
-                        if (this != pendingTask){
-                            if (!pendingTask.checkInventory()){
+                        if (this != pendingScheduledTask){
+                            if (!pendingScheduledTask.checkInventory()){
                                 messageHolder.sendMessage(this.formattedError());
                                 break;
                             }
@@ -446,7 +1052,8 @@ class Task {
                         break;
                     }
                     else {
-                        sleep(serverPing);
+                        if (!immediate)
+                            sleep(serverPing);
                     }
 
                 }
@@ -458,84 +1065,365 @@ class Task {
     }
     fun formattedError(){
         if (this.shouldBreak){
-            return 'failed to break block at '+ this.pos.formatted();
+            return 'failed to break block at '+ this.pos;
         }
-        return 'failed to place ' + this.itemString + ' at ' + this.pos.formatted();
+        return 'failed to place ' + this.itemString + ' at ' + this.pos + ' with predicate, piston facing should be ' + this.facing;
     }
     fun formatted(){
         if (this.shouldBreak){
-            return 'break block at '+ this.pos.formatted();
+            return 'break block at '+ this.pos;
         }
-        return 'place ' + this.itemString + ' at ' + this.pos.formatted();
+        return 'place ' + this.itemString + ' at ' + this.pos + ' with predicate, piston facing should be ' + this.facing;
+    }
+    fun formattedSuccess(){
+        if (this.shouldBreak){
+            return 'broke block at '+ this.pos + ' at' + getMilliTime();
+        }
+        return 'placed ' + this.itemString + ' at ' + this.pos+ ' with predicate , piston facing should be ' + this.facing +" executed at :" + getMilliTime();
     }
     fun copy(){
-        return new Task(this.pos.copy(), this.shouldBreak, this.item, this.facing, this.optional + 1);
+        return new WaitingScheduledTask(this.pos.copy(), this.shouldBreak, this.item, this.facing,this.predicate, this.optional + 1);
     }
 }
-class CyclicTaskGenerator {
-    var previousTask = null;
-    var currentTask = null;
-    var nextTask = null;
-    var ListOfTask;
+
+class LambdaScheduledTask {
+    // ScheduledTask with predicate -> lambda
+    var pos;
+    var lambda;
+    var optional = 0;
+    var connectedScheduledTask = null;
+    var isExecuted = false;
+    var predicate = fun (){return true;};
+    var immediate = true;
+    var ignoreDistance = true;
+    LambdaScheduledTask(predicate, lambda){
+        this.predicate = predicate;
+        this.lambda = lambda;
+    }
+    fun isImmediate(){
+        return true;
+    }
+    fun setImmediate(bool){
+        this.immediate = bool;
+    }
+    fun hash(){
+        return 'lambdaScheduledTask' + this.predicate + this.lambda;
+    }
+    fun isDone(){
+    // null returns for nothing required
+        if(this.isExecuted){
+            return null;
+        }
+        return this;
+    }
+    fun isAvailable(){
+        //external access
+        return this.predicate();
+    }
+    fun process(){
+    // checks, returns if processed
+        if (this.isAvailable()){
+            this.lambda();
+            this.isExecuted = true;
+        }
+        return false;
+    }
+    fun finish(){
+        this.process();
+    }
+    fun formattedError(){
+        return 'lambdaScheduledTask';
+    }
+    fun formatted(){
+        return 'lambdaScheduledTask';
+    }
+    fun formattedSuccess(){
+        return 'lambdaScheduledTask';
+    }
+}
+
+//Piston Utils, only implements static methods.
+class PistonUtils{
+    static fun canExtend(world, pos, facing){
+        if (facing == null || facing == Direction.NONE) {
+            throw new Error("Facing was none");
+        }
+        return world.getBlockAt(pos.offset(facing)).isReplaceable() && world.getBlockAt(pos).isReplaceable();
+    }
+    static fun canPlaceTorchPoweringPiston(world, pos, facing){
+    //returns Facing of Torch
+        if (!world.getBlockAt(pos).isReplaceable() ){
+            return null;
+        }
+        foreach (direction : Direction.getAllDirections()){
+            if (direction == facing){
+                continue;
+            }
+            if (direction.axis == Axis.Y){
+                clickPos = blockPos.down();
+                if (!world.getBlockAt(clickPos).sideCoversSmallSquare(Direction.UP)){
+                    continue;
+                }
+            }
+            else {
+                clickPos = blockPos.offset(torchFacing.getOpposite());
+                if (!world.getBlockAt(clickPos).sideCoversSmallSquare(facing.fromString) ){
+                    continue;
+                }
+            }
+            return direction;
+        }
+        return null;
+    }
+    static fun getHorizontalQcCheck(world, offsetFromPiston, pistonPos, pistonFacing){
+        // returns new PosWithDirection(startPos, validFacing)
+        // piston offset as 'startPos', then check with rotations and offset, to power piston.
+        // means this function just iterates over piston's one side to get powering torch postion.
+        startPos = pistonPos.offset(offsetFromPiston); //we offset from piston with direction, and this direction is restricted
+	    if(PistonUtils.requiredOffsetCheck(world, startPos, 'torch', Direction.DOWN) && PistonUtils.willPowerPiston(startPos, Direction.DOWN, pistonPos, pistonFacing)) {
+            return [startPos, Direction.DOWN];
+	    }
+	    foreach (torchTestFacing : Direction.getAllDirections()){
+	        if (torchTestFacing == Direction.UP || offsetFromPiston == torchTestFacing || offsetFromPiston == pistonFacing ) {
+	            continue; //restricted
+	        }
+	    	foreach(offB : [0,1]){
+	    		torchPos = startPos.up(offB);
+	    		torchAble = PistonUtils.requiredOffsetCheck(world, torchPos, 'torch', torchTestFacing);
+	    		if(torchAble && PistonUtils.willPowerPiston(torchPos, torchTestFacing, pistonPos, pistonFacing)) {
+	    			return [torchPos, torchTestFacing];
+	    	    }
+	    	}
+	    }
+	    return null;
+    }
+    // returns [torchPos, torchFacing] that can power piston
+    static fun calculateValidTorchPos(world, pistonPos, pistonFacing){
+        foreach (directions : Direction.getHorizontalDirections() ){
+            result = PistonUtils.getHorizontalQcCheck(world, directions, pistonPos, pistonFacing);
+            if (result != null){
+                return result;
+            }
+            if (pistonFacing != Direction.UP && PistonUtils.requiredOffsetCheck(world, pistonPos.up(), 'torch', directions)){
+                return [pistonPos.up(), directions];
+            }
+        }
+        if (pistonFacing != Direction.DOWN && PistonUtils.checkCanPlaceAt(world, pistonPos.down(), ItemStack.of(Material.of('torch')).asBlock())){
+            return [pistonPos.down(), Direction.DOWN];
+        }
+    }
+    // returns Record (named tuple) of piston's initial and final facing, torch's facing, piston's pos, torch's pos. It finds piston's direction automatically.
+    static fun calculateBreakingPiston(world, blockPos){
+        foreach ( directions : Direction.getAllDirections()){
+            // pistonPos is initial and pos, finalFacing is final facing of piston
+            pistonPos = blockPos.offset(directions);
+            finalFacing = directions.getOpposite();
+            foreach ( pistonFacing : Direction.getAllDirections()){
+                // if piston can't extend, continue
+                if (finalFacing == pistonFacing || !PistonUtils.canExtend(world, pistonPos, pistonFacing)){
+                    continue;
+                }
+                // get [torchPos, torchFacing] that can power piston. 
+                result = PistonUtils.calculateValidTorchPos(world, pistonPos, pistonFacing);
+                torchPos = result.get(0);
+                torchFacing = result.get(1);
+                // if piston can be powered by torch, return Record
+                if (result != null && PistonUtils.willPowerPiston(torchPos, torchFacing, pistonPos, finalFacing)){
+                    return new RecordPiston(pistonFacing, finalFacing, torchFacing, pistonPos, torchPos);
+                }
+            }
+        }
+        return null;
+    }
+    // with wanted piston's final facing, return Record ''
+    static fun calculateBreakingPiston(world, blockPos, finalFacing){
+        foreach ( directions : [finalFacing]){
+            pistonPos = blockPos.offset(finalFacing.getOpposite());
+            finalFacing = directions;
+            foreach ( pistonFacing : Direction.getAllDirections()){
+                if (finalFacing == pistonFacing || !PistonUtils.canExtend(world, pistonPos, pistonFacing)){
+                    continue;
+                }
+                result = PistonUtils.calculateValidTorchPos(world, pistonPos, pistonFacing);
+                if (result != null && PistonUtils.willPowerPiston(result.get(0), result.get(1), pistonPos, finalFacing)){
+                    return new RecordPiston(pistonFacing, finalFacing, result.get(1), pistonPos, result.get(0));
+                }
+            }
+        }
+        return null;
+    }
+    static fun willPowerPiston(posTorch, faceTorch, posPiston, facePiston){
+	    if (posPiston.offset(facePiston) == posTorch) {
+	        return false;
+	    }
+	    if (faceTorch.axis != Axis.Y && (posTorch.offset(faceTorch.getOpposite())== posPiston || posTorch.offset(faceTorch.getOpposite())==posPiston.up())){
+	        return false;
+	    }
+	    if (posPiston.up()==posTorch && faceTorch.axis != Axis.Y){
+	        return false;
+	    }
+	    if ( posPiston.down()==posTorch ){
+	        return true;
+	    }
+	    if (facePiston.axis == Axis.Y){
+	        foreach ( directions : Direction.getHorizontalDirections()){
+	            foreach (offsets : [0,1]){
+	                off = posPiston.offset(directions).offset(Direction.UP, offsets);
+	                if ( off==posTorch){
+	                    return true;
+	                }
+	            }
+	        }
+	    }
+	    foreach ( directions : Direction.getHorizontalDirections()){
+	        foreach ( offsets : [0,1]){
+	            if (offsets == 0 && directions == facePiston && posPiston.offset(directions)==posTorch){
+	                return false;
+	            }
+	            off = posPiston.offset(directions).offset(Direction.UP, offsets);
+	            if (off==posTorch){
+	                return true;
+	            }
+	        }
+	    }
+	    return false;
+    }
+    static fun requiredOffsetCheck(world, blockPos, itemString, torchFacing){
+        //WallMountedBlock, we need library maybe?
+        if (torchFacing == Direction.NONE){
+            torchFacing = Direction.DOWN;
+        }
+        if (itemString.contains('torch') && torchFacing.axis != Axis.Y){
+            clickPos = blockPos.offset(torchFacing.getOpposite());
+            if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).isReplaceable() || !world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName()) || world.getBlockAt(clickPos).getId() == pistonItem){
+                return false;
+            }
+        }
+        else {
+            if (world.getBlockAt(blockPos.down()).getId().contains('piston')){
+                return false; //Avoid PISTON - Torch at head because it can be used elsewhere
+            }
+            return PistonUtils.checkCanPlaceAt(world, blockPos, ItemStack.of(getFailSafeMaterial(itemString)).asBlock());
+        }
+        return true;
+    }
+    static fun checkCanPlaceAt(world, position, block){
+        if (!world.getBlockAt(position).isReplaceable()){
+            return false;
+        }
+        return player.canPlaceBlockAt(block, position);
+    }
+}
+
+class RecordPiston{
+    var pistonFacing;
+    var finalFacing;
+    var torchFacing;
+    var pistonPos;
+    var torchPos;
+    RecordPiston(pistonFacing, pistonFinalFacing, torchFacing, pistonPos, torchPos){
+        this.pistonFacing = pistonFacing;
+        this.finalFacing = pistonFinalFacing;
+        this.torchFacing = torchFacing;
+        this.pistonPos = pistonPos;
+        this.torchPos = torchPos;
+    }
+    fun formatted(){
+        return 'Piston at '+ this.pistonPos + ' with initial facing ' + this.pistonFacing.getName() + ' with final facing ' + this.finalFacing.getName() + '\nTorch at ' + this.torchPos + ' with facing '+ this.torchFacing.getName();
+    }
+}
+
+class CyclicScheduledTaskGenerator {
+    var previousScheduledTask = null;
+    var currentScheduledTask = null;
+    var nextScheduledTask = null;
+    var ListOfScheduledTask;
     var blockPos;
     var pointer;
     var length;
     var blockSize;
     var cycle = 0;
     var mapping = null;
-    //tasks : [PosWithFun(), shouldBreak, item, facing],....
-    CyclicTaskGenerator(tasks, originPos){
-        this.ListOfTask = tasks;
-        this.blockPos = new PosWithFun(originPos);
+    var invalid = false;
+    //tasks : [Pos(), shouldBreak, item, facing],....
+    CyclicScheduledTaskGenerator(tasks, originPos){
+        if (Type.of(originPos)  == Pos.type) {
+            originPos = originPos.toList();
+        }
+        this.ListOfScheduledTask = tasks;
+        this.blockPos = new Pos(originPos);
         this.length = len(tasks);
         this.blockSize = this.preCalculateBlockSize();
         this.pointer = 0;
     }
-    CyclicTaskGenerator(originPos){
-        this.ListOfTask = [];
-        this.blockPos = new PosWithFun(originPos);
+    CyclicScheduledTaskGenerator(originPos){
+        if (Type.of(originPos)  == Pos.type) {
+            originPos = originPos.toList();
+        }
+        this.ListOfScheduledTask = [];
+        this.blockPos = new Pos(originPos);
         this.length = 0;
-        this.blockSize = new PosWithFun(0,0,0);
+        this.blockSize = new Pos(0,0,0);
         this.pointer = 0;
     }
     fun preCalculateBlockSize(){
         // get minX Y Z maxX Y Z
-        minPos = new PosWithFun(0,0,0);
-        maxPos = new PosWithFun(0,0,0);
-        foreach(tasks : this.ListOfTask){
+        minPos = new Pos(0,0,0);
+        maxPos = new Pos(0,0,0);
+        foreach(tasks : this.ListOfScheduledTask){
             minPos = minPos.getMinPos(tasks.pos);
             maxPos = maxPos.getMaxPos(tasks.pos);
         }
-        return maxPos.subtract(minPos).add(new PosWithFun(1,1,1));
+        return maxPos.subtract(minPos).add(new Pos(1,1,1));
     }
     fun poll(){
-        this.previousTask = this.currentTask;
+        if (this.currentScheduledTask != null && !this.currentScheduledTask.isAvailable() && !this.currentScheduledTask.isExecuted){
+            messageHolder.sendActionBar(this.currentScheduledTask.findReason());
+            return null;
+        }
+        this.previousScheduledTask = this.currentScheduledTask;
         if (this.pointer == this.length){
             this.pointer = 0;
             this.cycle ++;
         }
         //position
-        this.currentTask = this.ListOfTask.get(this.pointer).add(this.blockPos.add(this.blockSize.mult(this.cycle)));
+        this.currentScheduledTask = this.ListOfScheduledTask.get(this.pointer).add(this.blockPos.add(this.blockSize.multiply(this.cycle, this.cycle, this.cycle)));
         this.pointer++;
-        return this.currentTask;
+        if (this.currentScheduledTask.isAvailable()){
+            this.currentScheduledTask.ignoreDistance = true;
+            return this.currentScheduledTask;
+        }
+        else if (this.currentScheduledTask.isDistanceInvalid()){
+            if (movementAllowed){
+                movementUtil.forward(this.currentScheduledTask.pos);
+            }
+        }
+        return null;
     }
     fun pollSafely(){
         //returns null if its okay, task if it should do something
-        pendingTask = null;
-        if (this.previousTask != null){
-            pendingTask = this.previousTask.isDone();
+        pendingScheduledTask = null;
+        if (this.previousScheduledTask != null){
+            pendingScheduledTask = this.previousScheduledTask.isDone();
+            new ClickScheduledTask(this.previousScheduledTask.pos).fix();
         }
         else {
             pendingtask = null;
         }
-        if (pendingTask == null){
+        if (pendingScheduledTask == null){
             return this.poll();
         }
-        return pendingTask;
+        return pendingScheduledTask;
     }
     fun execute(){
-        awaitingTask = this.pollSafely();
-        awaitingTask.finish();
+        awaitingScheduledTask = this.pollSafely();
+        if (awaitingScheduledTask != null){
+            awaitingScheduledTask.finish();
+        }
+        return false;
+    }
+    fun abortIfInvalid(){
+        return;
     }
     fun addAction(position, itemstring, direction, shouldBreak){
         if(this.mapping != null){
@@ -544,16 +1432,20 @@ class CyclicTaskGenerator {
             }
         }
         this.length ++;
-        this.ListOfTask.append(new Task(position, shouldBreak, itemstring, direction));
+        this.ListOfScheduledTask.append(new ScheduledTask(position, shouldBreak, itemstring, direction));
+    }
+    fun addAction(task){
+        this.length ++;
+        this.ListOfScheduledTask.append(task);
     }
     fun adjustOrigin(newOrigin){
-        this.blockPos = new PosWithFun(newOrigin);
+        this.blockPos = new Pos(newOrigin);
     }
     fun attachMapping(mapping){
         this.mapping = mapping;
     }
     fun getDiagonal(direction){
-        blockPos = new PosWithFun(0,0,0);
+        blockPos = new Pos(0,0,0);
         this.mapping = Mapping_Diagonal;
         if (this.mapping != null){
             yClockwise = direction.rotateYClockwise();
@@ -583,23 +1475,23 @@ class CyclicTaskGenerator {
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3), 3, direction, false); //piston
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,5), 6, direction, false); //dust
             this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,5), 6, direction, false); //dust
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3).up(), 5, DOWN, false); //carpet
-            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3).up(), 5, DOWN, false); //carpet
-            this.blockSize = new PosWithFun(0,0,0).offset(direction, 2).offset(yClockwise,2);
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,4).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,4).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(direction,6).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise,6).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(direction,3).up(), 5, Direction.DOWN, false); //carpet
+            this.addAction(blockPos.offset(direction,2).offset(yClockwise,2).offset(yClockwise,3).up(), 5, Direction.DOWN, false); //carpet
+            this.blockSize = new Pos(0,0,0).offset(direction, 2).offset(yClockwise,2);
             }
     }
     fun getStraightV1(direction){
             this.mapping = Mapping_Straight;
-            blockPos = new PosWithFun(0,0,0);
+            blockPos = new Pos(0,0,0);
             yClockwise = direction.rotateYClockwise();
             yCounterClockwise = direction.rotateYCounterclockwise();
-            if (direction .equals( EAST) || direction .equals( SOUTH)) {
+            if (direction == EAST || direction == SOUTH) {
                     this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction), 0, direction, false);//place rail
@@ -616,42 +1508,42 @@ class CyclicTaskGenerator {
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
                     this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, Direction.DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, Direction.DOWN, false); //place carpet
                     }//new
-            if (direction .equals( WEST) || direction .equals( NORTH)){
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, false); //place torch
+            if (direction == WEST || direction == NORTH){
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, Direction.DOWN, false); //place torch
                     this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(yClockwise), 0, yClockwise, true);//break rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, true);//break rail
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, DOWN, true); //break torch
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, false); //place torch
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 1, Direction.DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, Direction.DOWN, false); //place torch
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction), 0, direction, false);//place rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise), 0, yCounterClockwise, true);//break rail
                     this.addAction(blockPos.offset(direction).offset(direction).offset(direction), 0, direction, true);//break rail
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, DOWN, true); //break torch
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 1, Direction.DOWN, true); //break torch
                     this.addAction(blockPos.offset(direction).offset(yCounterClockwise), 3, direction, false); //place piston, facing east
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise), 3, direction, false); //place piston, facing east
                     this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise), 4, direction, false); //place powerableBlock
                     this.addAction(blockPos.offset(direction).offset(direction).offset(yCounterClockwise).offset(yCounterClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
                     this.addAction(blockPos.offset(direction).offset(yClockwise).offset(yClockwise), 2, direction.getOpposite(), false); //place repeater, facing east
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, DOWN, false);; //place carpet
-                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, DOWN, false); //place carpet
-                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, DOWN, false); //place carpet;//new
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).offset(yClockwise).up(), 5, Direction.DOWN, false);; //place carpet
+                    this.addAction(blockPos.offset(direction).offset(yCounterClockwise).up(), 5, Direction.DOWN, false); //place carpet
+                    this.addAction(blockPos.offset(direction).offset(direction).offset(yClockwise).up(), 5, Direction.DOWN, false); //place carpet;//new
             }
             this.blockSize = blockPos.offset(direction).offset(direction);
     }
     fun getStraightV2(direction){
             this.mapping = Mapping_Straight_v2;
-            blockPos = new PosWithFun(0,0,0);
+            blockPos = new Pos(0,0,0);
             yClockwise = direction.rotateYClockwise(); //right
             yCounterClockwise = direction.rotateYCounterclockwise(); //left
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction), 4, direction, false); //4 powerableblock
@@ -659,192 +1551,1415 @@ class CyclicTaskGenerator {
             this.addAction(blockPos.offset(yClockwise).offset(direction), 3, direction, false); //piston
             this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, direction, false); //rail
             this.addAction(blockPos.offset(direction, 2), 0, direction, false); //rail temporary
-            if (direction.equals(NORTH) || direction.equals(WEST)){
+            if (direction == NORTH || direction == WEST){
                 //we need torch
-                this.addAction(blockPos.offset(direction, -1).offset(yClockwise),  1,DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction, -1).offset(yClockwise),  1,Direction.DOWN, true); //torch breaking
                 this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,UP, false); //torch
             }
             this.addAction(blockPos.offset(direction), 0, direction, false); //rail will be curved
-            this.addAction(blockPos.offset(direction, 0).offset(yClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false);
+            this.addAction(blockPos.offset(yClockwise), 8, Direction.DOWN, true); //Now we can remove temporary powered rail
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 2), 2, direction.getOpposite(), false); //repeater
-            this.addAction(blockPos.offset(direction, 2), 0, DOWN, true); //break rail
+            this.addAction(blockPos.offset(direction, 2), 0, Direction.DOWN, true); //break rail
             this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, yCounterClockwise, false); //place temporary powered rail
+            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, Direction.DOWN, true); //break rail on piston
             this.addAction(blockPos.offset(direction, 2), 8, yCounterClockwise, false); // place powered rail
-            this.addAction(blockPos.offset(yClockwise).offset(direction).up(), 0, DOWN, true); //break rail on piston
             //half
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction,3), 4, direction, false); //4 powerableblock
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction,3), 4, direction, false);
             this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3), 3, direction, false); //piston
             this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, yCounterClockwise, false); //rail
             this.addAction(blockPos.offset(direction, 4), 0, direction, false); //rail temporary
-            if (direction.equals(NORTH) || direction.equals(WEST)){
+            if (direction == NORTH || direction == WEST){
                 //we need torch
-                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,DOWN, true); //torch breaking
-                this.addAction(blockPos.offset(direction, 3).offset(yClockwise),  1,UP, false); //torch placing
+                this.addAction(blockPos.offset(direction).offset(yCounterClockwise),  1,Direction.DOWN, true); //torch breaking
+                this.addAction(blockPos.offset(direction, 3).offset(yClockwise),  1, Direction.UP, false); //torch placing
             }
             this.addAction(blockPos.offset(direction, 3), 0, direction, false); //rail will be curved
-            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, DOWN, true); //Now we can remove temporary powered rail
+            this.addAction(blockPos.offset(direction, 2).offset(yCounterClockwise), 8, Direction.DOWN, true); //Now we can remove temporary powered rail
             this.addAction(blockPos.offset(yClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false);
             this.addAction(blockPos.offset(yCounterClockwise, 2).offset(direction, 4), 2, direction.getOpposite(), false); //repeater
             this.addAction(blockPos.offset(direction, 4).offset(yClockwise), 8, yCounterClockwise, false); //place temporary powered rail
-            this.addAction(blockPos.offset(direction, 4), 0, DOWN, true); //rail temporary remove
+            this.addAction(blockPos.offset(direction, 4), 0, Direction.DOWN, true); //rail temporary remove
             this.addAction(blockPos.offset(direction, 4), 8, yClockwise, false); //powered rail
-            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, DOWN, true); //rail
+            this.addAction(blockPos.offset(yCounterClockwise).offset(direction, 3).up(), 0, Direction.DOWN, true); //rail
             this.blockSize = blockPos.offset(direction, 4);
     }
 }
-class PosWithFun {
-    var x;
-    var y;
-    var z;
-    var shape = null;
-    var render = false;
-    PosWithFun(x, y, z){
-        this.x = x;
-        this.y = y;
-        this.z = z;
+
+class ScheduledTaskIterator {
+    //Single-use task container
+    var currentScheduledTask = null;
+    var ListOfScheduledTask;
+    var blockPos;
+    var pointer;
+    var length;
+    var blockSize;
+    var cycle = 0;
+    var mapping = null;
+    var invalid = false;
+    //tasks : [Pos(), shouldBreak, item, facing],....
+    ScheduledTaskIterator(tasks, originPos){
+        this.ListOfScheduledTask = tasks;
+        this.blockPos = new Pos(originPos);
+        this.length = len(tasks);
+        this.pointer = 0;
     }
-    PosWithFun(pos){
-        this.x = pos.getX();
-        this.y = pos.getY();
-        this.z = pos.getZ();
+    ScheduledTaskIterator(){
+        this.ListOfScheduledTask = [];
+        this.length = 0;
     }
-    fun getX(){
-        //compat with pos
-        return this.x;
+    ScheduledTaskIterator(originPos){
+        this.blockPos = new Pos(originPos);
+        this.ListOfScheduledTask = [];
+        this.length = 0;
     }
-    fun getY(){
-        return this.y;
+    fun isNear(other, allowDistance){
+        if (this.blockPos == null || other.blockPos == null){
+            return true;
+        }
+        return this.blockPos.distanceTo(other.blockPos) <= allowDistance;
     }
-    fun getZ(){
-        return this.z;
+    fun pollSafely(){
+        //get Any task that can be executed
+        i = 0;
+        foreach (tasks : this.ListOfScheduledTask){
+            pendingScheduledTask = tasks.isDone();
+            if (pendingScheduledTask != null && pendingScheduledTask.isAvailable()){
+                this.currentScheduledTask = pendingScheduledTask;
+                this.ListOfScheduledTask.remove(i);
+                this.length--;
+                return this.currentScheduledTask;
+            }
+            i++;
+        }
+        return null;
     }
-    fun add(other){
-        return new PosWithFun(this.x + other.getX(), this.y + other.getY(), this.z + other.getZ());
+    fun execute(){
+        awaitingScheduledTask = this.pollSafely();
+        if (awaitingScheduledTask != null){
+            awaitingScheduledTask.finish();
+        }
+        return false;
     }
-    fun subtract(other){
-        return new PosWithFun(this.x - other.getX(), this.y - other.getY(), this.z - other.getZ());
+    fun abortIfInvalid(){
+        return;
     }
-    fun distanceTo(otherPos){
-        dx = otherPos.getX() - this.x;
-        dy = otherPos.getY() - this.y;
-        dz = otherPos.getZ() - this.z;
-        return (dx ^2 + dy ^2 + dz ^2) ^ 0.5;
+    fun addAction(position, itemstring, direction, shouldBreak){
+        if(this.mapping != null){
+            if(this.mapping.get(itemstring) != null){
+                itemstring = this.mapping.get(itemstring);
+            }
+        }
+        this.length ++;
+        this.ListOfScheduledTask.append(new ScheduledTask(position, shouldBreak, itemstring, direction));
     }
-    fun isNear(entity){
-        pos = entity.getPos();
-        dist = this.distanceTo(pos);
-        return dist < playerReach;
+    fun addAction(action){
+        this.length ++;
+        this.ListOfScheduledTask.append(action);
     }
-    fun isNear(entity, distance){
-        pos = entity.getPos();
-        return this.distanceTo(pos) < distance;
+    fun attachMapping(mapping){
+        this.mapping = mapping;
     }
-    fun mult(integer){
-        return new PosWithFun(this.x * integer, this.y * integer, this.z * integer);
+    fun len(){
+        return this.length;
     }
-    fun asPos(){
-        return new Pos(this.x, this.y, this.z);
+}
+class LeftOverProcessingScheduledTask {
+    //holds positions of block that must be air
+    var tasks = {};
+    LeftOverProcessingScheduledTask(){
+
+    }
+    fun addPos(pos){
+        this.tasks.put(pos, getMilliTime());
+    }
+    fun process(){
+        this.clearKeys();
+        foreach(t : this.tasks.getKeys()){
+            if (this.tasks.get(t) + 600 < getMilliTime()){
+                if (t.isNear(player, playerReach))
+                {
+                    assertTool();
+                    messageHolder.sendDebugMessage(t.formatted());
+                    breakBlock(t, false);
+                }
+
+            }
+        }
+    }
+    fun clearKeys(){
+        foreach(t : this.tasks.getKeys()){
+            if (world.getBlockAt(t).isReplaceable()){
+                this.tasks.remove(t);
+            }
+        }
+    }
+}
+class BedrockBreakingScheduledTaskSeparator {
+    //Sets of task when bunch of bedrock breaking task is present
+    //yields executable when ALL positions are in range, and wait until yielded task is finished
+    var iterators = []; //we exepect Positions in container
+    var holding = null;
+    var holdingPos = null;
+    var bedrockPos = null;
+    var pointer = null;
+    BedrockBreakingScheduledTaskSeparator(){
+    }
+    BedrockBreakingScheduledTaskSeparator(fromList){
+        this.iterators = fromList.copy();
+    }
+    fun addAll(startPos, endPos){
+        foreach (positions : world.getPositions(startPos, endPos)){
+             if(this.checkValidPos(positions)){
+                this.iterators.append(new Pos(positions));
+             }
+        };
+    }
+    fun checkValidPos(pos){
+        return world.getBlockAt(pos).getHardness() == -1 && !world.getBlockAt(pos).getId().contains(pistonItem);
+    }
+    fun generateResult(pos){
+        recordPiston = PistonUtils.calculateBreakingPiston(world, pos);
+        if (recordPiston != null){
+            //messageHolder.sendDebugMessage(recordPiston.formatted());
+            return chainedPistonScheduledTaskRecord(recordPiston, false);
+        }
+        return null;
+    }
+    fun generateResultRegister(pos){
+        recordPiston = PistonUtils.calculateBreakingPiston(world, pos);
+        if (recordPiston != null){
+            this.holdingPos = recordPiston.pistonPos;
+            this.bedrockPos = pos;
+            messageHolder.sendMessageUnique(recordPiston.formatted());
+            return chainedPistonScheduledTaskRecord(recordPiston, false);
+        }
+        return null;
+    }
+    fun canYieldAny(){
+        foreach ( positions : this.iterators){
+            if (!this.checkValidPos(pos)){
+                continue;
+            }
+            taskIterators = this.generateResult(positions);
+            if (taskIterators != null && taskIterators.isAllNear()){
+                return true;
+            }
+        }
+        return false;
+    }
+    fun poll(){
+        this.checkFinished();
+        if (this.holding != null && !this.holding.isFinished() || this.holdingPos != null && !world.isAir(this.holdingPos)){
+            return null;
+        }
+        i = 0;
+        foreach ( positions : this.iterators){
+            if (!this.checkValidPos(positions)){
+                messageHolder.sendDebugMessage("" + positions + " is not valid pos to break, ignoring..." );
+                i++;
+                continue;
+            }
+            taskIterators = this.generateResultRegister(positions);
+            if (taskIterators != null && taskIterators.isAllNear()){
+                this.holding = taskIterators;
+                this.pointer = i;
+                messageHolder.sendDebugMessage("Holding bedrock breaking task for "+positions);
+                return taskIterators;
+            }
+            i++;
+        }
+        return null;
+    }
+    fun checkFinished(){
+        if (this.holding != null){
+            if (this.holding.isFinished() ){
+                sleep(serverPing); //ghost blocks
+                if (world.isAir(this.bedrockPos)){
+                    this.iterators.remove(this.pointer);
+                    messageHolder.sendDebugMessage("Finished bedrock breaking task for "+this.bedrockPos);
+                }
+                else {
+                    messageHolder.sendDebugMessage("Failed bedrock breaking task for "+this.bedrockPos);
+                }
+                this.pointer = null;
+                this.bedrockPos = null;
+                this.holding = null;
+            }
+        }
+    }
+}
+
+class SequencedScheduledTaskIterator {
+    //Single-use task container
+    var prettyPos = null;
+    var currentScheduledTask = null;
+    var returnedLastScheduledTask = null;
+    var ListOfScheduledTask;
+    var blockPos;
+    var pointer = 0;
+    var length = 0;
+    var blockSize;
+    var cycle = 0;
+    var invalid = false;
+    var mapping = null;
+    var ignoreDistance = false;
+    //tasks : [Pos(), shouldBreak, item, facing],....
+    SequencedScheduledTaskIterator(tasks, originPos){
+        this.ListOfScheduledTask = tasks;
+        this.blockPos = new Pos(originPos);
+        this.length = len(tasks);
+        this.pointer = 0;
+    }
+    SequencedScheduledTaskIterator(){
+        this.ListOfScheduledTask = [];
+        this.length = 0;
+    }
+    SequencedScheduledTaskIterator(originPos){
+        this.blockPos = new Pos(originPos);
+        this.ListOfScheduledTask = [];
+        this.length = 0;
+    }
+    fun isNear(other, allowDistance){
+        if (this.blockPos == null || other.blockPos == null){
+            return true;
+        }
+        return this.blockPos.distanceTo(other.blockPos) < allowDistance;
+    }
+    fun isAllNear(allowDistance){
+        if (this.ignoreDistance){
+            return true;
+        }
+        foreach (tasks : this.ListOfScheduledTask){
+            if (tasks.pos == null){
+                continue;
+            }
+            if (!tasks.pos.isWithin(player, allowDistance)){
+                return false;
+            }
+        }
+        return true;
+    }
+    fun isAllNear(){
+        if (this.ignoreDistance){
+            return true;
+        }
+        foreach (tasks : this.ListOfScheduledTask){
+            if (tasks.pos == null){
+                continue;
+            }
+            if (!tasks.pos.isWithin(player, playerReach)){
+                return false;
+            }
+        }
+        return true;
+    }
+    fun pollSafely(){
+        //get Any task that can be executed
+        if(this.length <= 0 || this.length == this.pointer){
+            return null;
+        }
+        tasks = this.ListOfScheduledTask.get(this.pointer);
+        while (tasks.isExecuted && this.pointer < this.length){
+            this.pointer ++;
+            tasks = this.ListOfScheduledTask.get(this.pointer);
+        }
+        if (this.length == this.pointer){
+            return null;
+        }
+        if (tasks.isAvailable() && !tasks.isExecuted){
+            this.currentScheduledTask = tasks;
+            this.returnedLastScheduledTask = tasks;
+            this.pointer ++;
+            return tasks;
+        }
+        return null;
+    }
+    fun abortIfInvalid(){
+        if (!this.isAllNear() || this.pollSafely() == null){
+            messageHolder.sendDebugMessage(this.formatted() + ' is invalid ');
+            this.invalid = true;
+        }
+    }
+    fun execute(){
+        this.ignoreDistance();
+        awaitingScheduledTask = this.pollSafely();
+        if (awaitingScheduledTask != null){
+            messageHolder.sendDebugMessage('execute ' + awaitingScheduledTask.formatted());
+            awaitingScheduledTask.finish();
+            messageHolder.sendDebugMessage('executed ' + awaitingScheduledTask.formatted()+'\n');
+        }
+        return false;
+    }
+    fun ignoreDistance(){
+        this.ignoreDistance = true;
+        //flags all tasks as distance verified
+        foreach (tasks : this.ListOfScheduledTask){
+            tasks.ignoreDistance = true;
+        }
+    }
+    fun addAction(position, itemstring, direction, shouldBreak){
+        if(this.mapping != null){
+            if(this.mapping.get(itemstring) != null){
+                itemstring = this.mapping.get(itemstring);
+            }
+        }
+        this.length ++;
+        this.ListOfScheduledTask.append(new ScheduledTask(position, shouldBreak, itemstring, direction));
+    }
+    fun addAction(action){
+        this.length ++;
+        this.ListOfScheduledTask.append(action);
+    }
+    fun attachMapping(mapping){
+        this.mapping = mapping;
+    }
+    fun len(){
+        return this.length;
+    }
+    fun isFinished(){
+        foreach ( task : this.ListOfScheduledTask){
+            if (!task.isExecuted){
+                return false;
+            }
+        }
+        return true;
     }
     fun formatted(){
-        return 'x '+ this.x + ' y' + this.y + ' z' + this.z;
+        ret = '';
+        foreach ( task : this.ListOfScheduledTask){
+            ret = ret+ task.formatted()+'\n';
+        }
+        if (this.prettyPos != null){
+            return 'ScheduledTask at '+ this.prettyPos.formatted() +'\n'+ ret;;
+        }
+        return ret;
     }
-    fun copy(){
-        return new PosWithFun(this.x, this.y, this.z);
-    }
-    fun offset(direction){
-        //south +z north -z west -x east +x
-        return this.add(direction.asVector());
-    }
-    fun offset(direction, amount){
-        return this.add(direction.asVector().mult(amount));
-    }
-    fun up(){
-        return this.add(new Direction('up'));
-    }
-    fun down(){
-        return this.add(new Direction('down'));
-    }
-    fun getMinPos(otherPos){
-        return new PosWithFun(Math.min(this.x, otherPos.x),Math.min(this.y, otherPos.y),Math.min(this.z, otherPos.z) );
+    fun abort(){
 
     }
-    fun getMaxPos(otherPos){
-        return new PosWithFun(Math.max(this.x, otherPos.x),Math.max(this.y, otherPos.y),Math.max(this.z, otherPos.z) );
-    }
 }
-class Direction {
-    var vector;
-    var pointer;
-    var fromString;
-    static var rotateYClockwiseArr = ['south', 'west', 'north', 'east'];
-    Direction(fromString){
-        fromString = fromString.lowercase();
-        if (fromString == 'south'){
-            this.vector = new PosWithFun(0,0,+1);
-            this.pointer = 0;
-        }
-        if (fromString == 'north'){
-            this.vector = new PosWithFun(0,0,-1);
-            this.pointer = 2;
-        }
-        else if (fromString == 'east'){
-            this.vector = new PosWithFun(1,0,0);
-            this.pointer = 3;
-        }
-       else if (fromString == 'west'){
-            this.vector = new PosWithFun(-1,0,0);
-            this.pointer = 1;
-        }
-       else if (fromString == 'up'){
-            this.vector = new PosWithFun(0,1,0);
-            this.pointer = null;
-        }
-       else if (fromString == 'down'){
-            this.vector = new PosWithFun(0,-1,0);
-            this.pointer = null;
-       }
-       this.fromString = fromString;
+
+class MovementScheduledTask{
+    var sneak = false;
+    var speed = 1;
+
+}
+
+class SpawnConditionCheck{
+    var world;
+    SpawnConditionCheck(world){
+        this.world = world;
     }
-    fun rotateYClockwise(){
-        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer + 1, 4)));
-    }
-    fun rotateYCounterclockwise(){
-        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer - 1, 4)));
-    }
-    fun getOpposite(){
-        if (this.pointer == null){
-            if (this.fromString == 'up'){
-                return new Direction('down');
+    //returns position for block to be placed
+    fun getZombieLightIgnored(pos){
+        pos = pos;
+        offsetBlock = this.world.getBlockAt(pos.down());
+        if(!offsetBlock.isSpawnable()){
+            doubleOffsetBlock = this.world.getBlockAt(pos.down(2));
+            if (doubleOffsetBlock.isSpawnable() && this.isNonReplaceAirVariant(pos.down())){
+                return this.returnIfReplaceable(pos);
             }
-            return new Direction('up');
+            //messageHolder.sendMessageUnique("Entity can't spawn at " + offsetBlock.getId() );
+            return null;
         }
-        return new Direction(Direction.rotateYClockwiseArr.get(Math.mod(this.pointer + 2, 4)));
+        if (Entity.of('minecraft:zombie').collidesWith(pos, this.world.getBlockAt(pos))){
+            //messageHolder.sendMessageUnique("Entity will collide with block " + this.world.getBlockAt(pos).getId() );
+            return null;
+        }
+        if (world.getBlockAt(pos).isReplaceable()){
+            return this.returnIfReplaceable(pos);
+        }
+        if (world.getBlockAt(pos.up()).isReplaceable()){
+            return this.returnIfReplaceable(pos.up());
+        }
+        return null;
     }
-    fun getX(){
-        return this.vector.getX();
+    fun getNormalSpawnProof(pos){
+        pos = pos;
+        if (!this.world.getBlockAt(pos.up()).isReplaceable()){
+            return null;
+        }
+        blockId = this.world.getBlockAt(pos.down()).getId();
+        if ( blockId == 'netherrack' || blockId == 'soul_sand'|| blockId == 'soul_soil'|| blockId.contains('ore')){
+            return this.returnIfReplaceable(pos);
+        }
+        return null;
     }
-    fun getY(){
-        return this.vector.getY();
+    fun returnIfReplaceable(pos){
+        if (this.world.getBlockAt(pos).isReplaceable()){
+            return pos;
+        }
+        return null;
     }
-    fun getZ(){
-        return this.vector.getZ();
+    fun isZombieLightIgnoredPos(pos){
+        p2 = this.getZombieLightIgnored(pos);
+        if(p2 != null && pos == p2){
+            return true;
+        }
+        return false;
     }
-    fun asVector(){
-        return this.vector.copy();
-    }
-    fun equals(other){
-        return this.fromString == other.fromString;
+    fun isNonReplaceAirVariant(pos){
+        block = this.world.getBlockAt(pos);
+        id = block.getId();
+        if (id.contains('torch') || id.contains('grass') || id.contains('flower')){
+            return true;
+        }
+        return false;
     }
 }
 
-// Script
-//t = new Task(new PosWithFun(249,111,206), 'repeater', 'west');
-//t.finish();
+client = MinecraftClient.getClient();
+clientJava = Java.valueOf(client);
 
-t = new CyclicTaskGenerator(new PosWithFun(player.getLookingAtBlock()).up());
-t.getStraightV2(new Direction('west'));
+jWorld = clientJava.world;
+player = client.getPlayer();
+world = client.getWorld();
+
+moveTasks = Set.of();
+movementAllowed = false;
+playerReach = 4.5;
+accurateBlockPlacement = false;
+carefulBreakSneak = false;
+movementUtil = new MovementUtil(player);
+messageHolder = new MessageHolder();
+delayedHolder = new BedrockBreakingScheduledTaskSeparator();
+leftovers = new LeftOverProcessingScheduledTask();
+messageHolder.debugFlag = false;
+pistonItem = 'piston';
+spawnChecker = new SpawnConditionCheck(world);
+taskInterval = 15; //10ms interval
+serverPing = 50;
+trustClient = true;
+tickCount = 2;
+immediateInterval = 0;
+//Hardcode sequences
+Mapping_Diagonal =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'sticky_piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
+Mapping_Straight =   {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern'};
+Mapping_Straight_v2 = {0 : 'rail', 1 : 'redstone_torch', 2 : 'repeater', 3 : 'piston', 4 : 'shroomlight', 5 : 'white_carpet', 6 : 'redstone', 7 : 'sea_lantern', 8 : 'powered_rail'};
+CUSTOM_BLOCKS = {'Repeater' : 2, 'Powerable' : 4, 'Spawnproofing' : 5, 'Pushing' : 7};
+NORTH = Direction.NORTH;
+SOUTH = Direction.SOUTH;
+WEST = Direction.WEST;
+EAST = Direction.EAST;
+UP = Direction.UP;
+DOWN = Direction.DOWN;
+pause = false;
+railPoweringScheduledTaskOff = true;
+railPowerItem = 'netherrack';
+spawnProofItem = 'glass';
+spawnProofScheduledTaskOn = false;
+sleepInterval = 0;
+hideMessage = true;
+singleUsePosSet = Set.of();
+
+AreaPos1 = null;
+AreaPos2 = null;
+InventoryUtil.debug = false;
+// Functions
+fun assertHaste(){
+    foreach ( effectname : player.getStatusEffects()){
+        if (effectname == 'haste')
+            return true;
+    }
+    return false;
+}
+fun isInHotbar(itemString){
+    return InventoryUtil.isInHotbar(itemString);
+}
+fun checkCanPlaceAt(position, block){
+    return PistonUtils.checkCanPlaceAt(world, position, block);
+}
+fun alreadyExistsAt(position, block){
+    return world.getBlockAt(position).getId() == block.getId();
+}
+fun swapToItem(itemString){
+    return InventoryUtil.swapToItem(itemString);
+}
+fun checkItem(itemString){
+    return InventoryUtil.checkItem(itemString);
+}
+// Swaps to pickaxe.
+fun swapToPickaxe(){
+    return InventoryUtil.swapToTool("pickaxe");
+}
+fun checkPickaxe(){
+    return InventoryUtil.checkTool('pickaxe');
+}
+fun assertItem(itemString){
+    return InventoryUtil.swapToItem(itemString);
+}
+
+fun assertTool(){
+    try {
+        return InventoryUtil.assertTool();
+    }
+    catch (error){
+        return false;
+    }
+}
+fun breakBlock(pos, requireSneak){
+    if (Type.of(pos).getName() != 'Pos'){
+        pos = pos;
+    }
+	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).isFluid() || world.isAir(pos)) {
+	    player.attackBlock(pos,'up');
+	    messageHolder.sendDebugMessage("Block "+ pos + world.getBlockAt(pos)+" was not breakable");
+	    if(world.getBlockAt(pos).getId() == 'moving_piston'){
+	        messageHolder.sendDebugMessage("Block "+ pos + world.getBlockAt(pos)+" was moving piston, waiting 10ms and breaking...");
+	        player.attackBlock(pos,'up');
+	    }
+	    return;
+	}
+	if (world.getBlockAt(pos).getHardness() == 0 && !world.getBlockAt(pos).isReplaceable()) {
+	    player.attackBlock(pos,'up');
+	    return;
+	}
+	if (world.getBlockAt(pos).getHardness() == -1 || world.getBlockAt(pos).getHardness() == 0 && world.getBlockAt(pos).isReplaceable()){
+	    return;
+	}
+	if (!world.getBlockAt(pos).isReplaceable()) {
+	    assertTool();
+        if (isBlockInstantBreakable(pos) || world.getBlockAt(pos).getId().contains('rail')){
+            player.attackBlock(pos,'up');
+            return;
+        }
+	    while(!world.getBlockAt(pos).isReplaceable()) {
+	    	sleep(50);
+	    	if (requireSneak) {player.setSneaking(true);}
+	    	player.updateBreakingBlock(pos);
+	    	if(world.getBlockAt(pos).isReplaceable()){break;}
+	    }
+	}
+}
+fun isBlockInstantBreakable(pos){
+    if (assertHaste()){
+        return true;
+    }
+    //assume pickaxe
+    b = world.getBlockAt(pos);
+    //hardness * 30 <
+    if (b.getId() == 'piston' || b.getId() == 'sticky_piston'){
+         property = b.getBlockProperties();
+         if (property.get('extended') && world.getBlockAt(pos.offset(property.get('facing'))).getId() == 'moving_piston'){
+            return false;
+         }
+    }
+    messageHolder.sendDebugMessage(player.getBlockBreakingSpeed(ItemStack.of(Material.NETHERITE_PICKAXE),b));
+    messageHolder.sendDebugMessage(b.getHardness() * 30);
+    return player.getBlockBreakingSpeed(ItemStack.of(Material.NETHERITE_PICKAXE),b) >=  b.getHardness() * 30;
+}
+
+//Simple carpet protocol
+fun applyCarpetProtocol(x,y,z,direction){
+    if (direction == Direction.NONE) {return [x,y,z];}
+	dirId = getDirectionId(direction);
+	return [x+2*dirId + 2, y, z];
+}
+fun getDirectionId(dir) {
+    if (dir.isValid()){
+        return dir.ordinal();
+    }
+    return 0;
+}
+fun placeTorch(blockPos, itemString){
+	if (assertItem(itemString) || trustClient){
+	    x = blockPos.getX();
+	    y = blockPos.getY();
+	    z = blockPos.getZ();
+	    player.interactBlock(x+0.5,y,z+0.5,"up",x,y-1,z,false);
+	    return true;
+	}
+	return false;
+}
+fun placeWallTorch(blockPos, itemString, torchFacing){
+    clickPos = blockPos.offset(torchFacing.getOpposite());
+    if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName())){
+        messageHolder.sendMessage("position "+ clickPos.formatted() + ' does not handle wall torch.');
+        return false;
+    }
+	if (assertItem(itemString) || trustClient){
+	    clickVec = clickPos.getSidePos(torchFacing);
+	    player.interactBlock( clickVec.getX(), clickVec.getY(), clickVec.getZ(),torchFacing.getName(),clickPos.getX(),clickPos.getY(),clickPos.getZ(),false);
+	    messageHolder.sendDebugMessage(clickPos.formatted() + ' '+ clickVec.formatted());
+	    return true;
+	}
+	return false;
+}
+fun requiredOffsetCheck(blockPos, itemString, torchFacing){
+    //WallMountedBlock, we need library maybe?
+    if (torchFacing == null){
+        torchFacing = Direction.DOWN;
+    }
+    if (itemString.contains('torch') && torchFacing.axis != Axis.Y){
+        clickPos = blockPos.offset(torchFacing.getOpposite());
+        if (!world.getBlockAt(clickPos.getX(),clickPos.getY(),clickPos.getZ()).sideCoversSmallSquare(torchFacing.getName())){
+            return false;
+        }
+    }
+    else {
+        return checkCanPlaceAt(blockPos, ItemStack.of(getFailSafeMaterial(itemString)).asBlock()) || alreadyExistsAt(blockPos, ItemStack.of(getFailSafeMaterial(itemString)).asBlock());
+    }
+    return true;
+}
+fun getLookRefYawPitchDirection(itemString,direction){
+    if (itemString.contains('torch')){
+        return null;
+    }
+    fy = 0;
+    fp = 0;
+	if (direction.isValid()) {
+	    if (itemString.contains("piston") || itemString.contains("repeater")){
+	    	direction = direction.getOpposite(); //well actually, we might need to have testing function
+	    }
+	    fy = player.getYaw();
+	    fp = player.getPitch();
+	    if (direction  == Direction.UP) {
+	    	fy = 0;
+	    	fp = -90;
+	    }
+	    else if (direction  == Direction.DOWN) {
+	    	fy = 0;
+	    	fp = 90;
+	    }
+	    else if (direction  == Direction.EAST) {
+	    	fy = -90;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.WEST) {
+	    	fy = 90;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.NORTH) {
+	    	fy = 180;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.SOUTH) {
+	    	fy = 0;
+	    	fp = 0;
+	    }
+	    return [fy, fp, direction];
+	}
+	else {
+	    return null;
+	}
+}
+fun placeDirectionBlock(blockPos,itemString, direction, immediate){
+    if(itemString.contains('torch')){
+        if (direction.axis == Axis.Y)
+            return placeTorch(blockPos, itemString);
+        else {
+            return placeWallTorch(new Pos(blockPos), itemString, direction);
+        }
+    }
+    fy = 0;
+    fp = 0;
+	if (direction.isValid()) {
+	    if (!accurateBlockPlacement && (itemString.contains("piston") || itemString.contains("repeater"))){
+	    	direction = direction.getOpposite(); //well actually, we might need to have testing function
+	    }
+	    fy = player.getYaw();
+	    fp = player.getPitch();
+	    if (direction  == Direction.UP) {
+	    	fy = 0;
+	    	fp = -90;
+	    }
+	    else if (direction  == Direction.DOWN) {
+	    	fy = 0;
+	    	fp = 90;
+	    }
+	    else if (direction  == Direction.EAST) {
+	    	fy = -90;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.WEST) {
+	    	fy = 90;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.NORTH) {
+	    	fy = 180;
+	    	fp = 0;
+	    }
+	    else if (direction  == Direction.SOUTH) {
+	    	fy = 0;
+	    	fp = 0;
+	    }
+	}
+	if (assertItem(itemString) || trustClient){
+	    x = blockPos.getX();
+	    y = blockPos.getY();
+	    z = blockPos.getZ();
+	    py = y;
+	    if ((direction != null && !accurateBlockPlacement) || itemString.contains("rail")) {
+	    	player.fakeLook(fy,fp,direction.getName(),8);
+	    	if (!immediate){
+	    	    sleep(taskInterval);
+	    	}
+	    	player.interactBlock(x+ 0.5,py+ 0.5,z + 0.5,direction.getName(),x,y,z,false);
+	    	if (itemString.contains("rail")){
+	    	    if (!immediate){
+	    	        sleep(taskInterval);
+	    	    }
+	    	}
+	    } else if (direction != null && accurateBlockPlacement){
+	    	carpetVec = applyCarpetProtocol(x,y,z,direction);
+	    	hx = carpetVec.get(0);
+	    	hy = carpetVec.get(1);
+	    	hz = carpetVec.get(2);
+	    	player.interactBlock(hx,hy,hz,direction.getName(),x,py,z,true);
+	    }
+	    else {
+            player.interactBlock(x,y,z,"north",x,y,z,false);
+	    }
+	    return true;
+	}
+	else {
+	    return false;
+	}
+}
+fun matchProperty(blockPos,blockId, propertyMap){
+    //matches blockState with property
+    cblock = world.getBlockAt(blockPos);
+    if (cblock.getId() != blockId){
+        return false;
+    }
+    mapping = cblock.getBlockProperties();
+    foreach ( properties : propertyMap.getKeys()){
+        if (propertyMap.get(properties) != mapping.get(properties)){
+            return false;
+        }
+    }
+    return true;
+}
+//Functions that generates Objects because there is no class A extends B in arucas
+//Sensei you got more work!
+
+
+//generated observingScheduledTask that executes with observed Position block has desired block, and properties.
+
+fun observingScheduledTask(blockPos,shouldBreak, itemString, facing, observePos, blockId, propertyMap){
+    predicate = fun (){return matchProperty(observePos, blockId, propertyMap);};
+    if (shouldBreak){
+        return new WaitingScheduledTask(blockPos, predicate);
+    }
+    else {
+        return new WaitingScheduledTask(blockPos, itemString, facing, predicate);
+    }
+    return null;
+}
+//Piston removal when it extends.
+fun pistonExtendRemovalScheduledTask(blockPos, facing){
+    shouldBreak = true;
+    itemString = pistonItem;
+    observePos = blockPos;
+    blockId = pistonItem;
+    propertyMap = {'extended' : true};
+    return observingScheduledTask(blockPos,true, itemString, facing, observePos, blockId, propertyMap);
+}
+fun pistonExtendRemovalScheduledTask(blockPos, facing, observePos){
+    shouldBreak = true;
+    propertyMap = {'extended' : true};
+    return observingScheduledTask(blockPos,true, pistonItem, facing, observePos, pistonItem, propertyMap);
+}
+fun pistonHeadFindingPredicate(blockPos, facing){
+    return fun(){return world.getBlockAt(blockPos.offset(facing)).getId() == 'piston_head';};
+}
+fun pistonRetractFindingPredicate(blockPos, facing){
+    return fun(){return world.getBlockAt(blockPos.offset(facing)).getId() == 'moving_piston';};
+}
+//Piston placement when A extends then B executes
+// We place piston in pos A, with torch at pos B, then wait until it 'extends'. if moving piston is found, remove torch first then piston, and replace (torch - optional) then piston with new direction. pt-tp-tp
+//
+fun chainedPistonScheduledTaskRecord(record, headless){
+     facing1 = record.pistonFacing;
+    facing2 = record.finalFacing;
+    bedrockPos = record.pistonPos.offset(facing2);
+    torchFacing = record.torchFacing;
+    torchPos = record.torchPos;
+    pistonPos = record.pistonPos;
+    iter = new SequencedScheduledTaskIterator();
+    tempScheduledTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing1);
+        tempScheduledTask = new FakeLookWaitingScheduledTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(tempScheduledTask);
+    }
+    pistonPlace = new WaitingScheduledTask(pistonPos, pistonItem, facing1, fun (){if (tempScheduledTask == null){return true;} else {if(tempScheduledTask.isExecuted){return true;} else {return false;} }}); //place piston
+    iter.addAction(pistonPlace);
+    fakeScheduledTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing2);
+        fakeScheduledTask = new FakeLookWaitingScheduledTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(fakeScheduledTask);
+    }
+    placingTorch = new WaitingScheduledTask(torchPos, 'redstone_torch', torchFacing, fun (){if (fakeScheduledTask == null){return pistonPlace.isExecuted;} else {if(pistonPlace.isExecuted && fakeScheduledTask.isExecuted){return true;} else {return false;} }});
+    iter.addAction(placingTorch);
+    placingTorch.setImmediate(true);
+    //break torch place torch break piston torch piston in same tick afap
+    lambdaTPPT = fun () {
+        new ScheduledTask(torchPos).executeUnchecked();
+        new ScheduledTask(pistonPos).executeUnchecked();
+        new ScheduledTask(pistonPos, pistonItem, facing2).executeUnchecked();
+        if (headless)
+            new ScheduledTask(torchPos,'redstone_torch', torchFacing).executeUnchecked();
+        sleep(350);
+        if (world.getBlockAt(pistonPos.offset(facing1)).getId().contains('piston')|| world.getBlockAt(pistonPos.offset(facing1,2)).getId().contains('piston')){
+            leftovers.addPos(pistonPos.offset(facing1));
+            leftovers.addPos(pistonPos.offset(facing1, 2));
+            new ScheduledTask(bedrockPos, 'slime_block', Direction.UP).executeUnchecked();
+        }
+    };
+    removeAndPlacePistonScheduledTask = new LambdaScheduledTask(fun(){if (placingTorch.isExecuted) {sleep(50); return true;}return false;},lambdaTPPT );
+    iter.addAction(removeAndPlacePistonScheduledTask);
+
+
+    if (!headless){
+        //task7 = new WaitingScheduledTask(torchPos, fun (){if(placePistonAgain.isExecuted){sleep(20);return true;};return false;});
+        task7 = new WaitingScheduledTask(torchPos, fun (){if(removeAndPlacePistonScheduledTask.isExecuted){sleep(50);leftovers.addPos(pistonPos);return true;};return false;});
+        task7.setImmediate(true);
+        iter.addAction(task7);
+    }
+    iter.prettyPos = pistonPos;
+    return iter;
+}
+fun chainedPistonScheduledTaskRecord2(record, headless){ //backup of working code
+    facing1 = record.pistonFacing;
+    facing2 = record.finalFacing;
+    bedrockPos = record.pistonPos.offset(facing2);
+    torchFacing = record.torchFacing;
+    torchPos = record.torchPos;
+    pistonPos = record.pistonPos;
+    iter = new SequencedScheduledTaskIterator();
+    tempScheduledTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing1);
+        tempScheduledTask = new FakeLookWaitingScheduledTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(tempScheduledTask);
+    }
+    pistonPlace = new WaitingScheduledTask(pistonPos, pistonItem, facing1, fun (){if (tempScheduledTask == null){return true;} else {if(tempScheduledTask.isExecuted){sleep(10); return true;} else {return false;} }}); //place piston
+    iter.addAction(pistonPlace);
+    fakeScheduledTask = null;
+    if (!accurateBlockPlacement){
+        fy, fp, requiredDirection = getLookRefYawPitchDirection(pistonItem,facing2);
+        fakeScheduledTask = new FakeLookWaitingScheduledTask(fy, fp, requiredDirection, fun () {return true;});
+        iter.addAction(fakeScheduledTask);
+    }
+    placingTorch = new WaitingScheduledTask(torchPos, 'redstone_torch', torchFacing, fun (){if (fakeScheduledTask == null){return pistonPlace.isExecuted;} else {if(pistonPlace.isExecuted && fakeScheduledTask.isExecuted){return true;} else {return false;} }});
+    iter.addAction(placingTorch);
+    placingTorch.setImmediate(true);
+    //optional slime block placement.
+    //task3 = new WaitingScheduledTask(torchPos, pistonHeadFindingPredicate(pistonPos, facing1)); //break torch
+    breakingTorch = new WaitingScheduledTask(torchPos, fun () {if (placingTorch.isExecuted){sleep(50); return true;} return false;}); //break torch
+    breakingTorch.setImmediate(true);
+    iter.addAction(breakingTorch);
+    torchRemovePredicate = fun(){return breakingTorch.isExecuted;};
+    placeTorchAgain = new WaitingScheduledTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate);//we use secondary position that prevents desync
+    placeTorchAgain.setImmediate(true);
+    removePiston = new WaitingScheduledTask(pistonPos, fun(){return breakingTorch.isExecuted;}); //remove piston
+    removePistonFinishPredicate = fun(){return removePiston.isExecuted;}; //check if done
+    removePiston.setImmediate(true);
+    placePistonAgain = new WaitingScheduledTask(pistonPos, pistonItem, facing2, removePistonFinishPredicate); //place piston
+    placePistonAgain.setImmediate(true);
+    iter.addAction(placeTorchAgain);
+    iter.addAction(removePiston);
+    iter.addAction(placePistonAgain);
+    if (!headless){
+        task7 = new WaitingScheduledTask(torchPos, fun (){if(placePistonAgain.isExecuted){sleep(20);return true;};return false;});
+        task7.setImmediate(true);
+        iter.addAction(task7);
+        task8 = new WaitingScheduledTask(pistonPos, fun () {if (world.isAir(bedrockPos)){sleep(10); leftovers.addPos(pistonPos); return true;} else if (task7.isExecuted){leftovers.addPos(pistonPos); sleep(150); return true;}; return false;}); //remove piston
+        iter.addAction(task8);
+    }
+    iter.prettyPos = pistonPos;
+    return iter;
+}
+fun chainedPistonScheduledTaskBreak(blockPos, facing1, facing2, torchPos, torchFacing){ //same pos, breaks block
+    iter = new SequencedScheduledTaskIterator();
+    task1 = new ScheduledTask(blockPos, pistonItem, facing1); //place piston
+    task2 = new ScheduledTask(torchPos, 'redstone_torch', torchFacing); //place torch
+    //optional slime block placement.
+    task3 = new WaitingScheduledTask(torchPos, pistonHeadFindingPredicate(blockPos, facing1)); //break torch
+    task3.setImmediate(true);
+    torchRemovePredicate = fun(){return task3.isExecuted;};
+    task4 = null;
+    task4 = new WaitingScheduledTask(blockPos, torchRemovePredicate); //remove piston
+    task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
+    task4.setImmediate(true);
+    task5 = new WaitingScheduledTask(blockPos, pistonItem, facing2, task4FinishPredicate); //place piston
+    task5.setImmediate(true);
+    iter.addAction(task1);
+    iter.addAction(task2);
+    iter.addAction(task3);
+    iter.addAction(task4);
+    iter.addAction(task5);
+    return iter;
+}
+fun chainedPistonScheduledTaskSelect(blockPos, facing1, facing2, torchPos, torchFacing, headless){ //same pos but with headless selection
+    iter = new SequencedScheduledTaskIterator();
+    task1 = new ScheduledTask(blockPos, pistonItem, facing1); //place piston
+    task2 = new ScheduledTask(torchPos, 'redstone_torch', torchFacing); //place torch
+    //optional slime block placement.
+    task3 = new WaitingScheduledTask(torchPos, pistonHeadFindingPredicate(blockPos, facing1)); //break torch
+    task3.setImmediate(true);
+    torchRemovePredicate = fun(){return task3.isExecuted;};
+    task4 = null;
+    if (headless){
+        task6 = new WaitingScheduledTask(torchPos, 'redstone_torch', torchFacing, torchRemovePredicate);//we use secondary position that prevents desync
+        task4FinishPredicate = fun(){return task6.isExecuted;};
+        task6.setImmediate(true);
+        task4 = new WaitingScheduledTask(blockPos, fun(){return task6.isExecuted;}); //remove piston
+        task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
+        task4.setImmediate(true);
+        task5 = new WaitingScheduledTask(blockPos, pistonItem, facing2, task4FinishPredicate); //place piston
+        task5.setImmediate(true);
+        iter.addAction(task1);
+        iter.addAction(task2);
+        iter.addAction(task3);
+        iter.addAction(task4);
+        iter.addAction(task6);
+        iter.addAction(task5);
+    }
+    else {
+        task4 = new WaitingScheduledTask(blockPos, torchRemovePredicate); //remove piston
+        task4FinishPredicate = fun(){return task4.isExecuted;}; //check if done
+        task4.setImmediate(true);
+        task5 = new WaitingScheduledTask(blockPos, pistonItem, facing2, task4FinishPredicate); //place piston
+        task5.setImmediate(true);
+        iter.addAction(task1);
+        iter.addAction(task2);
+        iter.addAction(task3);
+        iter.addAction(task4);
+        iter.addAction(task5);
+    }
+    return iter;
+}
+
+//spawnChecker.isZombieLightIgnoredPos(pos);
+//Initialize ScheduledTasks
+
+taskHolder = Set.of();
+taskFunctionHolder = Set.of();
+fillScheduledTask = fun ( x, y, z, ex, ey, ez, itemName) {
+    taskIterator = new ScheduledTaskIterator();
+    if (itemName == 'air'){
+        foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
+            taskIterator.addAction(position, 'Air', Direction.NONE, true);
+        }
+    }
+    else {
+        foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
+            taskIterator.addAction(position, itemName, Direction.NONE, false);
+        }
+    }
+    taskHolder.add(taskIterator);
+    messageHolder.sendDebugMessage('Added task length of '+taskIterator.len());
+};
+breakScheduledTask = fun ( x, y, z, ex, ey, ez) {
+    taskIterator = new ScheduledTaskIterator();
+    foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
+        taskIterator.addAction(position, 'Air', Direction.NONE, true);
+    }
+    taskHolder.add(taskIterator);
+    messageHolder.sendDebugMessage('Added task length of '+taskIterator.len());
+};
+breakBedrockAreaScheduledTask = fun (x,y,z,ex,ey,ez){
+    startPos = new Pos(x,y,z);
+    endPos = new Pos(ex,ey,ez);
+    delayedHolder.addAll(startPos, endPos);
+    messageHolder.sendMessage('Added task from '+ startPos + ' to '+ endPos);
+};
+setAreaPos1ScheduledTask = fun (x,y,z){
+    AreaPos1 = new Pos(x,y,z);
+    messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
+};
+setAreaPos1RayTraceScheduledTask = fun (){
+    AreaPos1 = player.getLookingAtBlock().getPos();
+    messageHolder.sendMessage('located bedrock breaking start pos 1 to '+ AreaPos1);
+};
+setAreaPos2ScheduledTask = fun (x,y,z){
+    AreaPos2 = new Pos(x,y,z);
+    messageHolder.sendMessage('located bedrock breaking start pos 2 to '+ AreaPos2);
+    if (AreaPos1 != null){
+        delayedHolder.addAll(AreaPos1, AreaPos2);
+        messageHolder.sendMessage('Added task from '+ AreaPos1 + ' to '+ AreaPos2);
+        AreaPos1 = null;
+        AreaPos2 = null;
+    }
+};
+setAreaPos2RayTraceScheduledTask = fun (){
+    AreaPos2 = player.getLookingAtBlock().getPos();
+    messageHolder.sendMessage('located bedrock breaking start pos 2 to '+ AreaPos2);
+    if (AreaPos1 != null){
+        delayedHolder.addAll(AreaPos1, AreaPos2);
+        messageHolder.sendMessage('Added task from '+ AreaPos1 + ' to '+ AreaPos2);
+        AreaPos1 = null;
+        AreaPos2 = null;
+    }
+};
+fillDirectionScheduledTask = fun ( x, y, z, ex, ey, ez, itemName, direction) {
+    taskIterator = new ScheduledTaskIterator();
+    direction = Direction.fromString(direction);
+    if (!direction.isValid()){
+        return null;
+    }
+    foreach (position : world.getPositions(new Pos(x,y,z), new Pos(ex,ey,ez))){
+        taskIterator.addAction(position, itemName, direction, false);
+    }
+    taskHolder.add(taskIterator);
+    messageHolder.sendDebugMessage('Added task length of '+taskIterator.len());
+};
+pauseScheduledTask = fun (){
+    pause = !pause;
+    messageHolder.sendMessageUnchecked(pause);
+};
+moveAutomaticTask = fun (){
+    movementAllowed = !movementAllowed;
+    messageHolder.sendMessageUnchecked("Move (piston bolt) automatically : "+ movementAllowed);
+};
+intervalChangeScheduledTask = fun(newInterval){
+    sleepInterval = newInterval;
+    messageHolder.sendMessageUnchecked('New interval : '+ newInterval + 'ms');
+};
+blockIntervalChangeScheduledTask = fun (newInterval){
+    if(newInterval > 0){
+        taskInterval = newInterval;
+        messageHolder.sendMessageUnchecked('New interval between blocks: '+ newInterval + 'ms');
+    }
+};
+toggleSyncScheduledTask = fun (boolean){
+    if (boolean){
+        client.disableSync();
+        messageHolder.sendMessageUnchecked('Disabled sync from server, please turn on after use!');
+    }
+    else {
+        client.enableSync();
+        messageHolder.sendMessageUnchecked('Enabled sync from server!');
+    }
+};
+serverPingChangeScheduledTask = fun (newInterval){
+    if(newInterval > 0){
+        serverPing = newInterval;
+        messageHolder.sendMessageUnchecked('Server Ping Expected: '+ newInterval + 'ms');
+    }
+};
+trustClientScheduledTask = fun (){
+    trustClient = !trustClient;
+    messageHolder.sendMessageUnchecked('Desync Trust : '+ trustClient );
+};
+toggleMessageScheduledTask = fun (){
+    hideMessage = !hideMessage;
+    messageHolder.sendMessageUnchecked('Hide message : '+ hideMessage );
+};
+toggleProtocolScheduledTask = fun (newVal){
+    accurateBlockPlacement = newVal;
+    messageHolder.sendMessageUnchecked('AccurateBlockPlacement : '+ accurateBlockPlacement );
+};
+demiBoltScheduledTask = fun(px, py, pz, direction){
+    taskInterval = Math.max(50, taskInterval);
+    direction = Direction.fromString(direction);
+    if(direction.isValid()){
+        t = new CyclicScheduledTaskGenerator(new Pos(px, py, pz));
+        t.getStraightV2(direction);
+        taskHolder.add(t);
+    }
+    else {
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+    }
+};
+standardBoltScheduledTask = fun(px, py, pz, direction){
+    taskInterval = Math.max(50, taskInterval);
+    direction = Direction.fromString(direction);
+    if(direction.isValid()){
+        t = new CyclicScheduledTaskGenerator(new Pos(px, py, pz));
+        t.getStraightV1(direction);
+        taskHolder.add(t);
+    }
+    else {
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+    }
+};
+diagonalBoltScheduledTask = fun(px, py, pz, direction){
+    taskInterval = Math.max(50, taskInterval);
+    direction = Direction.fromString(direction);
+    if(direction.isValid()){
+        t = new CyclicScheduledTaskGenerator(new Pos(px, py, pz));
+        t.getDiagonal(direction);
+        taskHolder.add(t);
+    }
+    else {
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+    }
+};
+reachDistanceScheduledTask = fun (newVal){
+    if(newVal > 0){
+        playerReach = newVal;
+        messageHolder.sendMessageUnchecked('New player reach distance : '+ newVal );
+    }
+};
+
+breakingScheduledTask = fun (px, py, pz, headless){
+    recordPiston = PistonUtils.calculateBreakingPiston(world, new Pos(px, py, pz));
+    if (recordPiston == null){
+        messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
+    }
+    else {
+        taskIterator = chainedPistonScheduledTaskRecord(recordPiston, headless);
+        taskHolder.add(taskIterator);
+    }
+};
+
+breakingLookingAtScheduledTask = fun (){
+    pos = player.getLookingAtBlock().getPos();
+    recordPiston = PistonUtils.calculateBreakingPiston(world, pos);
+    if (recordPiston == null){
+        messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
+    }
+    else {
+        taskIterator = chainedPistonScheduledTaskRecord(recordPiston, false);
+        taskHolder.add(taskIterator);
+    }
+};
+breakingLookingAtHeadlessScheduledTask = fun (direction, headless){
+    direction = Direction.fromString(direction);
+    if (!direction.isValid()) {
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+        return;
+    }
+    pos = player.getLookingAtBlock().getPos();
+    recordPiston = PistonUtils.calculateBreakingPiston(world, pos, direction);
+    if (recordPiston == null){
+        messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
+    }
+    else {
+        taskIterator = chainedPistonScheduledTaskRecord(recordPiston, headless);
+        taskHolder.add(taskIterator);
+    }
+};
+headlessScheduledTask = fun (px, py, pz, direction, headless){
+    direction = Direction.fromString(direction);
+    if(direction.isValid()){
+        recordPiston = PistonUtils.calculateBreakingPiston(world, new Pos(px, py, pz), direction);
+        if (recordPiston == null){
+            messageHolder.sendMessageUnchecked("Can't break block with piston, no method found");
+        }
+        else {
+            taskIterator = chainedPistonScheduledTaskRecord(recordPiston, headless);
+            taskHolder.add(taskIterator);
+        }
+    }
+    else {
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+    }
+};
+diagonalUpScheduledTask = fun (px, py, pz, direction, itemString){
+    direction = Direction.fromString(direction);
+    if(!direction.isValid()){
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+        return;
+    }
+    diagonalUpScheduledTasks = new CyclicScheduledTaskGenerator(new Pos(px,py,pz));
+    diagonalUpScheduledTasks.addAction(new ScheduledTask(new Pos(0,0,0), itemString, null));
+    diagonalUpScheduledTasks.blockSize = new Pos(0,1,0).offset(direction);
+    taskHolder.add(diagonalUpScheduledTasks);
+};
+bridgeScheduledTask = fun (px, py, pz, direction, itemString){
+    direction = Direction.fromString(direction);
+    if(!direction.isValid()){
+        messageHolder.sendMessageUnchecked("Direction name was not valid");
+        return;
+    }
+    bridgeScheduledTasks = new CyclicScheduledTaskGenerator(new Pos(px,py,pz));
+    bridgeScheduledTasks.addAction(new ScheduledTask(new Pos(0,0,0), itemString, null));
+    bridgeScheduledTasks.blockSize = new Pos(0,0,0).offset(direction);
+    taskHolder.add(bridgeScheduledTasks);
+    messageHolder.sendMessageUnchecked("Added bridge task starting from "+ new Pos(px, py, pz) + " toward direction "+ direction + " with item "+ itemString);
+};
+
+toggleActionBarScheduledTask = fun (){
+    messageHolder.actionbar = !messageHolder.actionbar;
+};
+//generate Scope with predicate, function for nearby blockPos
+PositionPredicateFunctionScheduledTask = fun (predicate, actionFunction, itemGetter) {return fun (){
+    item = itemGetter();
+    centerPos = player.getPos();
+    ranged = world.getPositions(centerPos.add(new Pos(playerReach, playerReach, playerReach)), centerPos.subtract(new Pos(playerReach, playerReach, playerReach)));
+    foreach (pos : ranged){
+        if (predicate(pos)){
+            messageHolder.sendDebugMessage("Action found for "+ pos);
+            if (actionFunction(pos, item)){
+                messageHolder.sendDebugMessage("Action found for "+ pos + " should sleep");
+                return true;
+            }
+        }
+    };
+    return false;
+};
+};
+fun predicateSpawnProof(pos){
+    if (!spawnProofScheduledTaskOn){
+        return false;
+    }
+    boolean = !singleUsePosSet.contains(pos) && spawnChecker.getNormalSpawnProof(pos)!= null && pos.isWithin(player, playerReach);
+    if (boolean){
+        singleUsePosSet.add(pos);
+        return true;
+    }
+    return false;
+}
+
+fun actionPlaceSpawnproofNearby(pos, item){
+    //messageHolder.sendDebugMessage(pos);
+    task = new ScheduledTask(pos, item, null);
+    task.ignoreDistance = true;
+    task.executeOrElse();
+    return false;
+}
+
+fun predicatePlacePower(pos){
+    if (railPoweringScheduledTaskOff){
+        return false;
+    }
+    boolean = world.getBlockAt(pos).getId() == 'powered_rail' && !world.getBlockAt(pos).getBlockProperties().get("powered");
+    if (boolean){
+        //its non-powered powered rail
+        return true;
+    }
+    return false;
+}
+fun actionPlacePowerNearby(pos, railPowerItem){
+    foreach (directions : Direction.getHorizontalDirections()){
+        newPos = pos.offset(directions);
+        newPosBelow = newPos.down();
+        if (world.getBlockAt(newPosBelow).isReplaceable() && world.getBlockAt(newPos).isReplaceable()){
+            //messageHolder.sendDebugMessage(newPosBelow.formatted());
+            new ScheduledTask(newPosBelow, railPowerItem, null).execute();
+            new ScheduledTask(newPos, 'redstone_torch', Direction.DOWN).execute();
+            sleep(serverPing);
+            return true;
+        }
+    }
+    return false;
+}
+
+//suggesters
+
+rayTraceX = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getX())];
+    }
+    return [player.getLookingAtBlock().getX()];
+};
+rayTraceY = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getY())];
+    }
+    return [player.getLookingAtBlock().getY()];
+};
+rayTraceZ = fun (args...){
+    block = player.getLookingAtBlock();
+    if (block.getId().contains('air')){
+        return [Math.round(player.getPos().getZ())];
+    }
+    return [player.getLookingAtBlock().getZ()];
+};
+toggleRailPoweringScheduledTask = fun (newBool){
+    railPoweringScheduledTaskOff = !newBool;
+    messageHolder.sendMessageUnchecked('Rail powering task is set to '+ (!railPoweringScheduledTaskOff));
+};
+
+setCustomItemScheduledTask = fun (itemType, itemName) {
+    item_idx = CUSTOM_BLOCKS.get(itemType);
+    Mapping_Diagonal.put(item_idx, itemName);
+    Mapping_Straight.put(item_idx, itemName);
+    Mapping_Straight_v2.put(item_idx, itemName);
+    messageHolder.sendMessageUnchecked('Item type : '+itemType + ' has changed to '+ itemName);
+};
+
+setRailPowerItem = fun (newItem){
+    railPowerItem = newItem;
+    messageHolder.sendMessageUnchecked('Rail power support item is set to ' + newItem);
+};
+setPistonItemScheduledTask = fun (newPiston){
+    if (newPiston.contains('piston'));
+        pistonItem = newPiston;
+    messageHolder.sendMessageUnchecked('Piston item is set to ' + newPiston);
+};
+
+toggleSpawnProofScheduledTask = fun (newBool){
+    spawnProofScheduledTaskOn = newBool;
+    messageHolder.sendMessageUnchecked('Spawnproof task is set to '+ (spawnProofScheduledTaskOn));
+};
+setSpawnProofItemScheduledTask = fun (newItem){
+    spawnProofItem = newItem;
+    messageHolder.sendMessageUnchecked('Spawnproof item is set to ' + newItem);
+};
+func = PositionPredicateFunctionScheduledTask(predicatePlacePower, actionPlacePowerNearby, fun(){return railPowerItem;});
+taskFunctionHolder.add(func);
+func = PositionPredicateFunctionScheduledTask(predicateSpawnProof, actionPlaceSpawnproofNearby, fun(){return spawnProofItem;});
+taskFunctionHolder.add(func);
+//Register commands.
+new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS]], fillScheduledTask).process();
+new LinearCommand([['eBreak'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakScheduledTask).process();
+new LinearCommand([['efill'],['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ],['itemName', 'Word', DefaultSuggester.BLOCKS], ['direction', 'Word', DefaultSuggester.DIRECTIONS]], fillDirectionScheduledTask).process();
+new LinearCommand([['eCommand'],['pause']], pauseScheduledTask).process();
+new LinearCommand([['eCommand'],['move']], moveAutomaticTask).process();
+new LinearCommand([['eCommand'],['toggleMessage']], toggleMessageScheduledTask).process();
+new LinearCommand([['eCommand'],['disableSync'], ['options', 'Boolean']], toggleSyncScheduledTask).process();
+new LinearCommand([['eCommand'],['toggleActionBar']], toggleActionBarScheduledTask).process();
+new LinearCommand([['eRailPowering'],['bool', 'Boolean']], toggleRailPoweringScheduledTask).process();
+new LinearCommand([['eRailPowering'],['setItem'], ['newItem', 'Word', DefaultSuggester.BLOCKS]], setRailPowerItem).process();
+new LinearCommand([['eSpawnproof'],['bool', 'Boolean']], toggleSpawnProofScheduledTask).process();
+new LinearCommand([['eSpawnproof'],['setItem'], ['newItem', 'Word', DefaultSuggester.BLOCKS]], setSpawnProofItemScheduledTask).process(); //setPistonItemScheduledTask
+new LinearCommand([['eCommand'],['AccurateBlockPlacement'], ['bool', 'Boolean']], toggleProtocolScheduledTask).process();
+new LinearCommand([['eCommand'],['toggleTrustClient']], trustClientScheduledTask).process();
+new LinearCommand([['eCommand'], ['setInterval'], ['milliseconds', 'Integer']], intervalChangeScheduledTask).process();
+new LinearCommand([['eCommand'], ['setBlockPlacmentInterval'], ['milliseconds', 'Integer']], blockIntervalChangeScheduledTask).process();
+new LinearCommand([['eCommand'], ['expectedServerPing'], ['milliseconds', 'Integer']], serverPingChangeScheduledTask).process();
+new LinearCommand([['eCommand'], ['setBoltItem'], ['itemType', 'Word', CUSTOM_BLOCKS.getKeys()], ['itemName', 'Word', DefaultSuggester.BLOCKS]], setCustomItemScheduledTask).process();
+new LinearCommand([['eDiagonalPlace'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', DefaultSuggester.HORIZONTAL], ['itemString', 'Word', DefaultSuggester.BLOCKS]], diagonalUpScheduledTask).process();
+new LinearCommand([['eBridge'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word',  DefaultSuggester.DIRECTIONS], ['itemString', 'Word', DefaultSuggester.BLOCKS]], bridgeScheduledTask).process();
+new LinearCommand([['eDemiBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], demiBoltScheduledTask).process();
+new LinearCommand([['eStandardBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], standardBoltScheduledTask).process();
+new LinearCommand([['eDiagonalBolt'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south']]], diagonalBoltScheduledTask).process();
+new LinearCommand([['eCommand'], ['setReachDistance'], ['reachDistance', 'Double']], reachDistanceScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setItem'], ['itemName', 'Word', ['piston', 'sticky_piston']]], setPistonItemScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['headless', 'Boolean']], breakingScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setPos1'] ,['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ]], setAreaPos1ScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setPos1'] ,['rayTrace']], setAreaPos1RayTraceScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setPos2'] ,['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ]], setAreaPos2ScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['setPos2'] ,['rayTrace']], setAreaPos2RayTraceScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ], ['direction', 'Word', ['north', 'west', 'east', 'south', 'up', 'down']], ['headless', 'Boolean']], headlessScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['rayTrace']], breakingLookingAtScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],  ['rayTrace'], ['direction', 'Word', ['north', 'west', 'east', 'south', 'up', 'down']], ['headless', 'Boolean']], breakingLookingAtHeadlessScheduledTask).process();
+new LinearCommand([['eBedrockBreaking'],['Area'], ['x', 'Integer', rayTraceX],['y', 'Integer', rayTraceY],['z', 'Integer', rayTraceZ],['ex', 'Integer', rayTraceX],['ey', 'Integer', rayTraceY],['ez', 'Integer', rayTraceZ]], breakBedrockAreaScheduledTask).process();
 while (true){
-    t.execute();
+    if (pause){
+        sleep(50);
+        continue;
+    }
+    if (player.getGamemode() == 'spectator'){
+        sleep(50);
+        continue;
+    }
+    leftovers.process();
+    polled = delayedHolder.poll();
+    if (polled != null){
+        taskHolder.add(polled);
+    }
+    foreach (tasks : taskHolder){
+        result = tasks.execute();
+        if (result){
+            taskHolder.remove(tasks);
+        }
+        if (sleepInterval > 0){
+            sleep(sleepInterval);
+        }
+    }
+    foreach (functions : taskFunctionHolder){
+        retVal = functions();
+    }
 }
+//PistonUtils.calculateValidTorchPos(world, new Pos(232,111,219), NORTH);
