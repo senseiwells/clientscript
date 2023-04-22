@@ -17,9 +17,11 @@ blacklistContains = Set.of();
 
 whitelistContains = Set.of();
 
-Player.get().message(''+ Player.get().getHeldItem().getNbt());
+//Player.get().message(''+ Player.get().getHeldItem().getNbt());
+
 mode = 'blacklistContains';
-enabled = false;
+Player.get().message('Current Mode is '+ mode);
+enabled = true;
 strategyBlackListContains = fun(block:Block){
     foreach(blockNames : blacklistContains){
         if (block.getId().contains(blockNames)){
@@ -152,8 +154,8 @@ suggesterStrategy = fun (args...){
 };
 
 print("Block breaking control loaded with /break command");
-new LinearCommand([['break'],['blacklist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['exact', 'contains']]], addBlacklistTask).process();
-new LinearCommand([['break'],['whitelist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['exact', 'contains']]], addWhitelistTask).process();
+new LinearCommand([['break'],['blacklist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['blacklistExact', 'blacklistContains']]], addBlacklistTask).process();
+new LinearCommand([['break'],['whitelist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['whitelistExact', 'whitelistContains']]], addWhitelistTask).process();
 new LinearCommand([['break'],['blacklist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS]], addBlacklistContainsTask).process();
 new LinearCommand([['break'],['whitelist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS]], addWhitelistContainsTask).process();
 new LinearCommand([['break'],['remove'], ['string', 'Word', suggesterRemove]], addWhitelistContainsTask).process();
