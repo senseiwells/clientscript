@@ -13,7 +13,8 @@ globalBlockPositions = {};
 player = Player.get();
 world = client.getWorld();
 maxDistance = 32;
-maxSearchThreadCount = 8;
+minSearchInterval = 400;
+maxSearchThreadCount = 6;
 maxWorldHeight = 192;
 minWorldHeight = 0;
 xreach = 32;
@@ -151,7 +152,7 @@ fun isWithinRange(checkPos, p1, p2){
     ez = Math.max(p1.getZ(), p2.getZ());
     return mx <= checkPos.getX() && ex >= checkPos.getX() && my <= checkPos.getY() && ey >= checkPos.getY() && mz <= checkPos.getZ() && ez >= checkPos.getZ() ;
 }
-fun stopRender(idx){
+fun stopAndRefreshRender(idx){
     //player.message('Index '+ idx);
     boxlist = tempRendering.get(idx);
     foreach (boxes : boxlist){
@@ -200,24 +201,6 @@ fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
     else {
         centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
     }
-    javaCenter = Java.valueOf(center);
-    maxDistancePredicate = fun (blockPos){
-        if(maxDistance == 0 || !setCenter){
-            return true;
-        }
-        return javaCenter.squaredDistanceTo(blockPos).toArucas() <  maxDistance^2;
-    };
-    playerCenter = Java.valueOf(player.getPos().asCentre().subtract(0.5, 0.5, 0.5));
-    maxAroundPredicate = fun (blockPos){
-        if(maxAround == 0){
-            return true;
-        }
-        return playerCenter.squaredDistanceTo(blockPos).toArucas() <  maxAround^2;
-    };
-    areaSelectedPredicate = fun (blockPos){
-        if (startPos == null || endPos == null) {return true;}
-        return isWithinRange(blockPos, startPos, endPos);
-    };
     sx = centerAs.getX().round();
     xr = xreach;
     yr = yreach;
@@ -241,7 +224,7 @@ fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
     foreach (Area : areas){
         currentidx = i;
         lambdaAsync = strategyPureArucas(Area, function, arguments, apply);
-        task = new Task().then(fun(){result = lambdaAsync(); tempRendering.put(currentidx, result);}).then(fun(){stopRender(currentidx);return tempRendering.get(i);});
+        task = new Task().then(fun(){result = lambdaAsync(); tempRendering.put(currentidx, result);}).then(fun(){stopAndRefreshRender(currentidx);return tempRendering.get(i);});
         tasks.append(task);
         i++;
     }
@@ -268,9 +251,15 @@ fun iterateFunDirect(xreach,yreach, zreach, function, arguments, apply){
                 collect(Collector.toList()).toArucas();
 
 }
+
+fun threadRunner(function){
+    valueHolder = null;
+    Thread.runThreaded(fun(){valueHolder = function();});
+    return valueHolder;
+}
 fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
-    retVal = [];
-        centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+ retVal = [];
+    centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
     if(maxAround > 0){
         centerAs = center;
     }
@@ -278,18 +267,55 @@ fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
         centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
     }
     sx = centerAs.getX().round();
+    xr = xreach;
+    yr = yreach;
+    zr = zreach;
     sy = centerAs.getY().round();
     sz = centerAs.getZ().round();
-    lambda  = fun (){
-    streamInit = BlockPos.iterate(BlockPos(new Pos(sx-xreach, sy-yreach, sz-zreach)), BlockPos(new Pos(sx+xreach, sy+yreach, sz+zreach))).spliterator();
-    return StreamSupport.stream(streamInit, Java.valueOf(false)).
-                filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
-                map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
-                filter(Java.predicateOf(fun(a){return a != false && a != null;})).
-                collect(Collector.toList()).toArucas();
-    };
-    lazyValue = Thread.runThreaded(lambda);
-    return lazyValue;
+    if (maxAround != 0){
+        xr = Math.min(xreach, maxAround);
+        yr = Math.min(yreach, maxAround);
+        zr = Math.min(zreach, maxAround);
+    }
+    areas = null;
+    if (startPos != null && endPos != null){
+        areas = clampY(new Box(startPos, endPos), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    else {
+        areas = clampY(new Box(new Pos(sx-xr, sy-yr, sz-zr), new Pos(sx+xr, sy+yr, sz+zr)), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    tasks = {};
+    i = 0;
+    foreach (Area : areas){
+        currentidx = i;
+        lambdaAsync = strategyPureArucas(Area, function, arguments, apply);
+        while (tasks.size() >= maxSearchThreadCount || tasks.get(currentidx) != null){
+            //Player.get().messageActionBar("Waiting for threads to finish, current task count: " + tasks + "");
+            sleep(100);
+        }
+        //Player.get().messageActionBar("Starting new thread, current task count: " + tasks + "");
+        Thread.runThreaded(fun () {
+            b = currentidx;
+            while (tasks[b] != null){
+                //Player.get().messageActionBar("Waiting for threads to finish, current task index: " + b + "");
+                sleep(100);
+            }
+            tasks[b] = true;
+            result = lambdaAsync();
+            tempRendering.put(b, result);
+            //Player.get().messageActionBar("Thread finished, current task index: " + b + "");
+            stopAndRefreshRender(b);
+            //Player.get().messageActionBar("Refreshed render, current task index: " + b + "");
+            tasks.remove(b);
+            return tempRendering.get(b);
+        });
+        i++;
+    }
+    while (tasks.size() > 0){
+        //Player.get().messageActionBar("Waiting for all threads to finish, current task " + tasks + "");
+        sleep(100);
+    }
+    return;
 }
 
 compareStrategy = 'compare';
@@ -297,7 +323,7 @@ compareOptions = {
     'compare' : fun (a,b) {return a.contains(b);},
     'exact' : fun (a,b) {return a == b;}
 };
-strategy = 'Async';
+strategy = 'Lazy';
 options = {'Async' : iterateFunAsync, 'Lazy' : iterateFunLazy, 'Direct' : iterateFunDirect};
 fun renderBoxWhateverColorFromMap(position, color){
     box = new BoxShape(position);
@@ -360,17 +386,18 @@ fun stopRenderBoxesWhen(b, reference){
     }
 }
 fun highlightJavaPredicateColor(predicate, mapping) {
-    boxes = new Task().then( fun() {return iterateFunJavaPredicateColored(predicate, mapping);}).run().await();
+    boxes = iterateFunJavaPredicateColored(predicate, mapping);
     //renderHolder = renderBoxes(boxes);
     st = getMilliTime();
     nextRender = null;
+    sleep(50);
     while (true){
         if (renderOnce){
             Refresh = false;
             renderOnce = false;
             player.messageActionBar("Scheduled Rendering, will sleep, wait....");
         }
-        globalBoxesNext = new Task().then( fun() {return iterateFunJavaPredicateColored(predicate, mapping);}).run().await();
+        globalBoxesNext = iterateFunJavaPredicateColored(predicate, mapping);
         player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms with Thread count " + (xThreads * yThreads * zThreads));
         st = getMilliTime();
         //nextRender = renderBoxes(globalBoxesNext);
@@ -381,6 +408,7 @@ fun highlightJavaPredicateColor(predicate, mapping) {
                 Refresh = true;
             }
         }
+        sleep(minSearchInterval);
         //renderHolder.await();
         //renderHolder = nextRender;
     }
@@ -495,25 +523,25 @@ fun predicateBiome(biomeName){
 }
 // variable RGB class
 class VarRGB : RGBColor {
-    var r;
-    var g;
-    var b;
+    var R;
+    var G;
+    var B;
     var hex;
     var opacity;
     //optional
     var name = null;
     var notify = false;
     VarRGB(r,g,b){
-        this.r = r;
-        this.g = g;
-        this.b = b;
+        this.R = r;
+        this.G = g;
+        this.B = b;
         this.hex = b+ 256 * g + 65536 * r;
         this.opacity = opacity;
     }
     VarRGB(r,g,b, o) {
-        this.r = r;
-        this.g = g;
-        this.b = b;
+        this.R = r;
+        this.G = g;
+        this.B = b;
         this.hex = b+ 256 * g + 65536 * r;
         this.opacity = o;
     }
@@ -659,7 +687,7 @@ saveListTask = fun (args...){
        if (value.instanceOf(List.type)){
            mapping_fixed.put(strings, value);
        }
-       else if (value.instanceOf(VarColors.type)){
+       else if (value.instanceOf(Colors.type)){
            mapping_fixed.put(strings, value.toList());
        }
        else if (value.instanceOf(RGBColor.type)){
@@ -1434,7 +1462,8 @@ new LinearCommand([['highlight'], ['refresh']], refresh).process();
 new LinearCommand([['highlight'], ['toggleRefresh']], setStopRefresh).process();
 
 //highlightJavaPredicate(predicate);
-thread = Thread.runThreaded(fun (){highlightJavaPredicateColor(predicateMap, mapping);});
+thread = Thread.runThreaded('highlight thread',fun (){ highlightJavaPredicateColor(predicateMap, mapping);
+    });
 //thread = Thread.runThreaded(fun (){highlightJavaPredicateColorBlock(predicateMapBlock, mapping);});
 //highlightJavaPredicateColor(predicateMap, mapping);
 hold();
