@@ -1225,6 +1225,9 @@ class PistonUtils{
                 }
                 // get [torchPos, torchFacing] that can power piston. 
                 result = PistonUtils.calculateValidTorchPos(world, pistonPos, pistonFacing);
+                if (result == null){
+                    continue;
+                }
                 torchPos = result.get(0);
                 torchFacing = result.get(1);
                 // if piston can be powered by torch, return Record
@@ -1678,10 +1681,10 @@ class LeftOverProcessingScheduledTask {
         this.clearKeys();
         foreach(t : this.tasks.getKeys()){
             if (this.tasks.get(t) + 600 < getMilliTime()){
-                if (t.isNear(player, playerReach))
+                if (t.isWithin(player, playerReach))
                 {
                     assertTool();
-                    messageHolder.sendDebugMessage(t.formatted());
+                    messageHolder.sendDebugMessage(t);
                     breakBlock(t, false);
                 }
 
@@ -1712,7 +1715,7 @@ class BedrockBreakingScheduledTaskSeparator {
     fun addAll(startPos, endPos){
         foreach (positions : world.getPositions(startPos, endPos)){
              if(this.checkValidPos(positions)){
-                this.iterators.append(new Pos(positions));
+                this.iterators.append(positions);
              }
         };
     }
@@ -2057,6 +2060,8 @@ singleUsePosSet = Set.of();
 AreaPos1 = null;
 AreaPos2 = null;
 InventoryUtil.debug = false;
+
+lastPlacedPower = 0;
 // Functions
 fun assertHaste(){
     foreach ( effectname : player.getStatusEffects()){
@@ -2831,8 +2836,9 @@ fun actionPlacePowerNearby(pos, railPowerItem){
     foreach (directions : Direction.getHorizontalDirections()){
         newPos = pos.offset(directions);
         newPosBelow = newPos.down();
-        if (world.getBlockAt(newPosBelow).isReplaceable() && world.getBlockAt(newPos).isReplaceable()){
+        if (world.getBlockAt(newPosBelow).isReplaceable() && world.getBlockAt(newPos).isReplaceable() && getMilliTime() - lastPlacedPower > 1000){
             //messageHolder.sendDebugMessage(newPosBelow.formatted());
+            lastPlacedPower = getMilliTime();
             new ScheduledTask(newPosBelow, railPowerItem, null).execute();
             new ScheduledTask(newPos, 'redstone_torch', Direction.DOWN).execute();
             sleep(serverPing);
