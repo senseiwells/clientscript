@@ -1,0 +1,23 @@
+import * from Minecraft;
+
+// GameEvent class is in Minecraft module.
+
+// prevents is a dictionary that contains all the entities that you want to prevent.
+// You can add more entities by adding more lines.
+prevents = {
+    'villager' : true
+};
+new GameEvent("onAttackEntity", fun(entity) {
+    // Code
+    id = entity.getId();
+    // if prevents[id] is true, then cancel the event
+    if (prevents[id] == true) {
+        // Cancel the event
+        GameEvent.cancel();
+    }
+}, 
+// true means you set the event to be cancelable, and it will run at main thread.
+true);
+
+// hold function 'holds' the script, so it won't stop.
+hold();

@@ -1,0 +1,610 @@
+// Filter Setup Script.
+import * from Minecraft;
+import * from minecraft.CommandUtils;
+import * from util.Json;
+// When we interact Hopper and if hopper downward is 'powered', then we define it as filter.
+// Unless, if option is enabled, we will define it as filter too.
+// We will try to find Named 64-size items in player inventory, then send one to hopper's inventory[1,2,3,4], leaving 0 as empty.
+// for 0th slot, if option is enabled, we can try to get 'offset block' from hopper position to some position, then convert it to item and put it in 0th slot.
+
+CONFIG = {
+    "enabled" : true,
+    "offset" : new Pos(0,0,0), // offset from hopper position used for forceFilterOffset
+    "forceFilter" : false, // we will ignore filter check
+    "forceFilterOffset" : false, // if true, we will try to get offset block and put it in 0th slot.
+    "modifyFilterOffset" : false, // Moves position references
+    "forceFilterOffsetAmount" : 1, // send 1 item if offset is enabled.
+    "wait_sync_ms" : 100,
+    "debug" : true
+};
+
+// temporary global variables
+LastInteractedBlockPos = null;
+cachedWorld = Player.get().getWorld();
+
+// {worldId : {pos : Boolean}}
+INVENTORY_CACHE = {
+
+};
+OFFSETS = {};
+OFFSET_RENDERS = {}; // contains render boxes of OFFSETS
+
+fun debug_print(argument){
+    if (CONFIG['debug']) {
+        print(argument);
+    }
+}
+
+class ConfigGenerator {
+
+    static var DEFAULT_NAME = "DEFAULT";
+
+    static var CONVERTIBLE = Set.of(Boolean.type, Number.type, String.type);
+    // {type : {type : String, serializer : Function, parser : Function}}
+    static var CUSTOM_TYPES = {
+        Pos.type : {
+            'type' : 'list', 
+            'serializer' : fun(pos) { return [pos.getX(), pos.getY(), pos.getZ()]; },
+            'parser' : fun(list) { return new Pos(list[0], list[1], list[2]); }
+            }
+        };
+
+    static var TYPES = Set.of('boolean', 'cycle', 'double', 'double_slider', 'integer', 'integer_slider', 'list', 'string', 'name');
+
+    // pass any map, and it will return ConfigHandler with all configs
+    static fun ofMapping(map : Map) : ConfigHandler {
+        handler = new ConfigHandler(ConfigGenerator.DEFAULT_NAME, false);
+        foreach (value : map.getKeys()) {
+            config = ConfigGenerator.defaultConfigOf(value, map[value]);
+            if (config != null) {
+                handler.addConfig(config);
+            }
+        }
+        return handler;
+    }
+
+    // pass any map, and it will return ConfigHandler with all configs with name
+    static fun ofMapping(name : String, map : Map) : ConfigHandler {
+        handler = new ConfigHandler(name, false);
+        foreach (value : map.getKeys()) {
+            config = ConfigGenerator.defaultConfigOf(value, map[value]);
+            if (config != null) {
+                handler.addConfig(config);
+            }
+        }
+        return handler;
+    }
+
+    static fun defaultConfigOf(name, value) : Config | Null {
+        if (!ConfigGenerator.CONVERTIBLE.contains(Type.of(value))) {
+            return ConfigGenerator.parsibleConfigOf(name, value);
+        }
+        /*
+        configMap = {
+            "type": "string", // REQUIRED, possible : 'boolean', 'cycle', 'double', 'double_slider', 'integer', 'integer_slider', 'list', 'string', 'name'
+            "name": "My Config", // REQUIRED
+            "description": "This is my config", // optional
+            "category": "Useful", // optional
+            "optional_info": "This is an optional info", // optional
+            "default_value": "foo", // NOT optional
+            "value": "bar", // optional, if not set, default_value is used
+            "listener": fun(newValue) { }, //optional, called when the config is changed
+            "max_length": 64 // optional when type is string
+        };
+        */
+        mapping = {
+            "name" : name,
+            "default_value" : value,
+            "value" : value,
+            "listener" : fun(newValue) { CONFIG[name] = newValue.getValue(); }
+        };
+        if (value.instanceOf(Boolean.type)) {
+            mapping['type'] = 'boolean';
+        }
+        else if (value.instanceOf(Number.type)) {
+            if (Math.floor(value) != value){
+                mapping['type'] = 'double';
+            }
+            else {
+                mapping['type'] = 'integer';
+            }
+        }
+        else if (value.instanceOf(String.type)) {
+            mapping['type'] = 'string';
+        }
+        return Config.fromMap(mapping);
+    }
+
+    // registers a custom type
+    // example for Pos :
+    // ConfigGenerator.registerConvertible(Pos.type, 'list', fun(pos) { return [pos.getX(), pos.getY(), pos.getZ()]; }, fun(list) { return new Pos(list[0], list[1], list[2]); });
+    // concept : ConfigGenerator.registerConvertible(TypeObject, 'predefinedObject(type)', (Object) -> (predefinedObject), (predefinedObject) -> (Object));
+    static fun registerConvertible(type : Type, configurableType : String, serializer : Function, parser : Function) {
+        if (!ConfigGenerator.TYPES.contains(configurableType)) {
+            throw new Error("Invalid configurable type : " + configurableType);
+        }
+        ConfigGenerator.CUSTOM_TYPES[type] = {
+            "type" : configurableType,
+            "serializer" : serializer,
+            "parser" : parser
+        };
+    }
+
+    static fun parsibleConfigOf(name, value) : Config | Null {
+        valueType = Type.of(value);
+        if (ConfigGenerator.CUSTOM_TYPES.containsKey(valueType)) {
+            serializer = ConfigGenerator.CUSTOM_TYPES[valueType]['serializer'];
+            parser = ConfigGenerator.CUSTOM_TYPES[valueType]['parser'];
+            serializedValue = serializer(value);
+            mapping = {
+                "name" : name,
+                "default_value" : serializedValue,
+                "value" : serializedValue,
+                "listener" : fun(newValue) { CONFIG[name] = parser(newValue.getValue()); }
+            };
+            mapping['type'] = ConfigGenerator.CUSTOM_TYPES[valueType]['type'];
+            return Config.fromMap(mapping);
+        }
+        else {
+            return null;
+        }
+    }
+}
+
+configHandler = ConfigGenerator.ofMapping("AutoFilterConfig", CONFIG);
+configHandler.setSaveOnClose(false); // we don't save, settings are temporary
+
+class ScreenInventory {
+    static var player = Player.get();
+    static var MAX_CPT = 24; // 40 cps = 2 cpt(click per tick)
+    static var CHECK_EVERY = 4; // check every 4 ticks
+    static var TICK = 4; // 20 ticks per second, decreases by 1 every tick
+    static var CLICKED_COUNT = 0; // number of clicks in a second, refreshed every second
+    static var CLICK_SLEEP_MS = 100; // sleep 100 ms after click
+
+    static fun refreshPlayer(){
+        ScreenInventory.player = Player.get();
+    }
+
+    static fun getPlayer(){
+        return ScreenInventory.player;
+    }
+
+    static fun resetClickCount(){
+        // reset click count and tick if tick is 0
+        if (ScreenInventory.TICK == 0) {
+            ScreenInventory.TICK = ScreenInventory.CHECK_EVERY;
+            ScreenInventory.CLICKED_COUNT = 0;
+        }
+    }
+
+    static fun cpsRestriction(){
+        ScreenInventory.CLICKED_COUNT++;
+        if (ScreenInventory.CLICKED_COUNT >= ScreenInventory.MAX_CPT * ScreenInventory.CHECK_EVERY) {
+            sleep(ScreenInventory.CLICK_SLEEP_MS);
+        }
+    }
+
+    static fun rightClickSlot(slot : Number) {
+        ScreenInventory.clickSlot(slot, 'right', 'click');
+        ScreenInventory.cpsRestriction();
+    }
+
+    // left clicks slot once
+    static fun leftClickSlot(slot : Number) {
+        ScreenInventory.clickSlot(slot, 'left', 'click');
+        ScreenInventory.cpsRestriction();
+    }
+
+    // abstract click slot function, get Player and call clickSlot
+    static fun clickSlot(slot : Number, click : String, action : String) {
+        ScreenInventory.getPlayer().clickSlot(slot, click, action);
+        ScreenInventory.cpsRestriction();
+    }
+
+    static fun moveItem(fromSlot : Number, toSlot : Number, amount : Number, moveAll : Boolean) {
+        if (moveAll) {
+            ScreenInventory.leftClickSlot(fromSlot);
+            ScreenInventory.leftClickSlot(toSlot);
+        }
+        else {
+            ScreenInventory.leftClickSlot(fromSlot);
+            for (i = 0; i < amount; i++) {
+                ScreenInventory.rightClickSlot(toSlot);
+            }
+            ScreenInventory.leftClickSlot(fromSlot);
+        }
+    }
+}
+
+
+
+// iterates through player inventory, and returns first slot number that contains item with name.
+fun findFilterItemSlot() : Number {
+    player = Player.get();
+    slotSize = player.getTotalSlots();
+    foreach (slot : range(slotSize)) {
+        if (!player.isPlayerSlot(slot)){
+            continue;
+        }
+        item = player.getItemForSlot(slot);
+        if (isItemFilterable(item)) {
+            return slot;
+        }
+    }
+    return -1;
+}
+// predicate -> [[slot, count],...]
+// predicate : (item : ItemStack) -> Boolean
+fun findAllMatchingSlotsPlayer(predicate) : List {
+    returnValue = [];
+    player = Player.get();
+    slotSize = player.getTotalSlots();
+    foreach (slot : range(slotSize)) {
+        if (!player.isPlayerSlot(slot)){
+            continue;
+        }
+        item = player.getItemForSlot(slot);
+        if (predicate(item)) {
+            returnValue.append([slot, item.getCount()]);
+        }
+    }
+    return returnValue;
+}
+// predicate -> [[slot, count],...]
+fun findAllMatchingSlotsExternal(predicate) : List {
+    returnValue = [];
+    player = Player.get();
+    slotSize = player.getTotalSlots();
+    foreach (slot : range(slotSize)) {
+        if (player.isPlayerSlot(slot)){
+            continue;
+        }
+        item = player.getItemForSlot(slot);
+        if (predicate(item)) {
+            returnValue.append([slot, item.getCount()]);
+        }
+    }
+    return returnValue;
+}
+
+fun getRequiredSlotsToSend() : List {
+    // returns [1,2,3,4] if all slots are empty
+    // returns [0,...] if config is enabled.
+    // generate predicate that checks if item is null or empty
+    predicate = fun (item : ItemStack) : Boolean{
+        if (item == null) {
+            return true;
+        }
+        if (item.getCount() == 0 || item.getFullId() == "minecraft:air") {
+            return true;
+        }
+        return false;
+    };
+    // get all empty slots in external inventory except 0th slot
+    emptySlots = findAllMatchingSlotsExternal(predicate);
+    if (!CONFIG['forceFilterOffset'] || CONFIG['forceFilterOffsetAmount'] == 0) {
+        // if [0,*] exists, remove it.
+        emptySlots = emptySlots.filter(fun (slot) : Boolean {
+            return slot[0] != 0;
+        });
+    }
+    // return slot numbers
+    return emptySlots.map(fun (slot) : Number {
+        return slot[0];
+    });
+}
+
+fun getOffsetFilterItem(pos : Pos) : ItemStack {
+    // if offset is not enabled, return null
+    if (!CONFIG['forceFilterOffset']) {
+        return null;
+    }
+    // get player
+    player = Player.get();
+    // get offset block
+    offsetBlock = cachedWorld.getBlockAt(pos.add(CONFIG['offset']));
+    // get item from offset block
+    offsetItem = offsetBlock.getMaterial().asItemStack();
+    return offsetItem;
+}
+// Map -> {targetSlot : [[fromSlot, amount, moveAll?],...]}
+// means we will send [amount] of items from [fromSlot] to [targetSlot], and if [moveAll?] is true, we will send all items in [fromSlot].
+fun getSlotsMatchingToSend(pos) : Map {
+    slots = getRequiredSlotsToSend();
+    slotsMatching = {};
+    foreach (slot : slots) {
+        if (slot == 0) {
+            // if slot is 0, then we need to get offset item.
+            offsetItem = getOffsetFilterItem(pos);
+            matchingSlots = findAllMatchingSlotsPlayer(fun (item : ItemStack) : Boolean {
+                if (item == null) {
+                    return false;
+                }
+                if (item.getFullId() != offsetItem.getFullId()) {
+                    return false;
+                }
+                if (!item.getNbt().isEmpty()) {
+                    return false;
+                }
+                return true;
+            });
+            amountToSend = CONFIG['forceFilterOffsetAmount'];
+            slotsAndClicks = []; // [[slot, amount, moveAll?],...] to send
+            foreach (slotAndAmount : matchingSlots) {
+                if (amountToSend == 0) {
+                    break;
+                }
+                if (slotAndAmount[1] <= amountToSend) {
+                    slotsAndClicks.append([slotAndAmount[0], slotAndAmount[1], true]);
+                    amountToSend -= slotAndAmount[1];
+                }
+                else {
+                    slotsAndClicks.append([slotAndAmount[0], amountToSend, false]);
+                    amountToSend = 0;
+                }
+            }
+            // if we don't have enough items, warn with name of item.
+            if (amountToSend > 0) {
+                print("Not enough items to send to slot " + slot + " : " + offsetItem.getFullId());
+            }
+            slotsMatching[slot] = slotsAndClicks;
+        }
+        else {
+            // create predicate with findAllMatchingSlotsPlayer and isItemFilterable
+            matchingSlots = findAllMatchingSlotsPlayer(isItemFilterable);
+            amountToSend = 1;
+            slotsAndClicks = []; // [[slot, amount, moveAll?],...] to send
+            foreach (slotAndAmount : matchingSlots) {
+                if (amountToSend == 0) {
+                    break;
+                }
+                if (slotAndAmount[1] <= amountToSend) {
+                    slotsAndClicks.append([slotAndAmount[0], slotAndAmount[1], true]);
+                    amountToSend -= slotAndAmount[1];
+                }
+                else {
+                    slotsAndClicks.append([slotAndAmount[0], amountToSend, false]);
+                    amountToSend = 0;
+                }
+            }
+            if (amountToSend > 0) {
+                // we don't have enough amount, warn
+                print("Not enough items to send to slot " + slot);
+            }
+            slotsMatching[slot] = slotsAndClicks;
+        }
+    }
+    return slotsMatching;
+}
+
+fun isItemFilterable(item : ItemStack) {
+    // check if item is null
+    if (item == null) {
+        return false;
+    }
+    // check if item is 64-size
+    if (item.getMaxCount() != 64) {
+        return false;
+    }
+    // check if item is not empty
+    if (item.getCount() == 0 || item.getFullId() == "minecraft:air") {
+        return false;
+    }
+    // check if item is named
+    itemNbt = item.getNbt();
+    // access display -> Name, if its not null, then item is named.
+    if (itemNbt['display'] == null) {
+        return false;
+    }
+    if (itemNbt['display']['Name'] == null) {
+        return false;
+    }
+    return true;
+}
+
+fun moveItem(pos){
+    slotsToSend = getSlotsMatchingToSend(pos);
+    foreach (targetSlot : slotsToSend.getKeys()) {
+        value = slotsToSend[targetSlot];
+        // ScreenInventory.moveItem(fromSlot : Number, toSlot : Number, amount : Number, moveAll : Boolean)
+        foreach (slotAndClick : value) {
+            ScreenInventory.moveItem(slotAndClick[0], targetSlot, slotAndClick[1], slotAndClick[2]);
+        }
+    }
+}
+
+fun getCurrentScreenName() : String | Null {
+    // get player
+    player = Player.get();
+    // get current screen
+    screen = player.getCurrentScreen();
+    // if screen is null, return null
+    if (screen == null) {
+        return null;
+    }
+    // else return screen name
+    return screen.getName();
+}
+fun waitHopperScreen() {
+    // loops until hopper screen is opened.
+    // try 10 times, then throw error.
+    for (i = 0; i < 10; i++){
+        sleep(CONFIG['wait_sync_ms']);
+        if (getCurrentScreenName() == "Hopper") {
+            return;
+        }
+    }
+    throw new Error("Hopper screen not opened.");
+}
+
+fun checkCachedState(pos : Pos) {
+    worldCache = INVENTORY_CACHE[Player.get().getWorld().getFullId()];
+    if (worldCache == null) {
+        worldCache = {};
+        INVENTORY_CACHE[Player.get().getWorld().getFullId()] = worldCache;
+    }
+    if (worldCache[pos.toString()] == null) {
+        return false;
+    }
+    return worldCache[pos.toString()];
+}
+
+fun cacheState(pos) {
+    // check current screen name
+    screenName = getCurrentScreenName();
+    if (screenName != "Hopper") {
+        return;
+    }
+    worldCache = INVENTORY_CACHE[Player.get().getWorld().getFullId()];
+    if (worldCache == null) {
+        worldCache = {};
+        INVENTORY_CACHE[Player.get().getWorld().getFullId()] = worldCache;
+    }
+    // register 
+    pos = pos.toString();
+    player = Player.get();
+    foreach (i : range(player.getTotalSlots())) {
+        if (player.isPlayerSlot(i)) continue;
+        item = player.getItemForSlot(i);
+        if (item == null || item.getCount() == 0 || item.getCount() < item.getMaxCount()) {
+            debug_print("Slot " + i + " is not full, skipping, item was " + item.toString());
+            worldCache[pos] = false;
+            return;
+        }
+    }
+    worldCache[pos] = true;
+}
+
+fun checkIsFilterHopper(pos : Pos) : Boolean {
+    // if forceFilter is enabled, return true
+    if (CONFIG['forceFilter']) {
+        return true;
+    }
+    // else, check if hopper below is powered
+    if (isPoweredHopper(pos.down())){
+        // debug
+        debug_print("Hopper at " + pos.toString() + " is filter hopper.");
+        // now check if hopper is facing down
+        block = cachedWorld.getBlockAt(pos);
+        if (block.getBlockProperties()['facing'] == 'down') {
+            if (!checkCachedState(pos.down())) {
+                debug_print("Hopper downward is not cached as full inventory, skipping");
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+fun isPoweredHopper(pos : Pos) : Boolean {
+    // get block at pos
+    block = cachedWorld.getBlockAt(pos);
+    // if block is hopper, check if it is powered
+    // caution : we are in client side, directly using enabled state can cause desync.
+    if (block.getFullId() == "minecraft:hopper") {
+        powerValue = 0;
+        foreach (side : ['up', 'down', 'north', 'south', 'east', 'west']) {
+            powerValue = cachedWorld.getEmittedRedstonePower(pos.offset(side), side);
+            if (powerValue > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+fun onHopperScreen(pos){
+    waitHopperScreen();
+    // check if hopper is filter hopper
+    if (!checkIsFilterHopper(pos)) {
+        cacheState(pos);
+        return;
+    }
+    moveItem(pos);
+}
+
+fun saveListTask(){
+   file = new File(File.getDirectory().getAbsolutePath() + '/AutoFilter_CACHE.json');
+   Json.fromMap(INVENTORY_CACHE).writeToFile(file);
+   print('File written to '+ file.getAbsolutePath());
+};
+
+fun loadListTask(){
+   file = new File(File.getDirectory().getAbsolutePath() + '/AutoFilter_CACHE.json');
+   if (!file.exists()) return;
+   INVENTORY_CACHE = Json.fromString(file.read()).getValue();
+   print('File loaded from '+ file.getAbsolutePath());
+};
+
+fun renderBox(pos : Pos, bit : Boolean) {
+    if (OFFSETS[bit] == pos) return;
+    if (OFFSET_RENDERS[bit] != null) {
+        OFFSET_RENDERS[bit].stopRendering();
+    }
+    if (bit) {
+        print("Hopper position is set to "+ pos);
+    }
+    else {
+        print("Relative position is set to "+ pos);
+    }
+    OFFSETS[bit] = pos;
+    box = new BoxShape(pos);
+    hex = 0x000000;
+    if (bit) {
+        hex = 0x00FF00;
+    }
+    else {
+        hex = 0xFF0000;
+    }
+    box.setColour(hex);
+    box.setOpacity(80);
+    box.render();
+    OFFSET_RENDERS[bit] = box;
+    if (OFFSETS[true] != null && OFFSETS[false] != null) {
+        sx, sy, sz = OFFSETS[true].toList();
+        ex, ey, ez = OFFSETS[false].toList();
+        offset = new Pos(ex - sx, ey - sy, ez - sz);
+        CONFIG['offset'] = offset;
+        print("Calculated Display Item Reference to "+ offset);
+    }
+}
+
+new GameEvent('onAttackBlock', fun(block) {
+    if (CONFIG['enabled'] && CONFIG['modifyFilterOffset']) {
+        renderBox(block.getPos(), Player.get().isSneaking());
+    }
+}, true).register();
+
+new GameEvent('onClientTick', fun(){
+    ScreenInventory.resetClickCount();
+}).register();
+
+new GameEvent('onScriptEnd', fun () {
+    saveListTask();
+}).register();
+
+new GameEvent("onInteractBlock", fun (block, itemStack){
+    LastInteractedBlockPos = block.getPos();
+}).register();
+
+new GameEvent("onOpenScreen", fun (screen) {
+    if (!CONFIG['enabled']) return;
+    if (screen.getName() == "Hopper") {
+        onHopperScreen(LastInteractedBlockPos);
+    }
+}).register();
+
+new GameEvent('onDimensionChange', fun(changedDimension) {
+    cachedWorld = Player.get().getWorld();
+}).register();
+
+// usage : /AutoFilter openConfig
+print("Auto Filter Loaded, type /AutoFilter openConfig to open config.");
+LinearCommand.register([['Autofilter'], ['openConfig']], fun(){
+    Player.get().openScreen(configHandler.createScreen(Text.of("Auto Filter Config")));
+});
+
+loadListTask();
+hold();

@@ -1,253 +1,435 @@
 import * from Minecraft;
-
+import Java from util.Internal;
+import * from minecraft.CommandUtils;
+import * from util.Concurrency;
+import * from util.Predicates;
+import * from minecraft.BoxUtils;
+import RGBColor, Colors from util.Colors;
+import * from minecraft.PosUtils;
+import * from util.Json;
+import * from minecraft.Chunk;
 client = MinecraftClient.getClient();
-player = client.getPlayer();
+globalBlockPositions = {};
+player = Player.get();
 world = client.getWorld();
-
+maxDistance = 32;
+minSearchInterval = 400;
+maxSearchThreadCount = 6;
+maxWorldHeight = 192;
+minWorldHeight = 0;
+xreach = 32;
+yreach = 32;
+zreach = 32;
+xThreads = 2;
+yThreads = 2;
+zThreads = 2;
+safetyLimit = 20000000;
+printLocations = false;
+StreamSupport = Java.classOf("java.util.stream.StreamSupport");
+BlockPos = Java.classOf("net.minecraft.util.math.BlockPos");
+Collector = Java.classOf('java.util.stream.Collectors');
 globalBoxes = {};
-fun getIterator(start, end, num){
-    ii = 0;
-    maxlen = 1000000;
-    ret = [start];
-    c = start;
-    while (c < end && ii < maxlen){
-        c = c+num;
-        ret.append(c);
-        ii = ii+1;
+globalBoxesSet = {};
+tempRendering = {};
+//i -> Boxes set that is divided.
+positionHashSet = Set.of();
+Refresh = false;
+renderOnce = false;
+threadSleepCheckInterval = 1;
+setCenter = false;
+maxAround = 0;
+center = player.getPos();
+startPos = null;
+endPos = null;
+opacity = 10;
+outlinePixelWidth = 0;
+outlineColor = 0;
+cachedChunks = {}; // double mapping that uses cachedkey -> chunk mapping
+renderThroughBlocks = true;
+autosave = false;
+
+Configs = {
+    'searchBlockColour': Colors.RED,
+    'searchBlockOpacity': 10
+};
+
+// class TextedWorldPos : pos, dimension -> unique position with dimension, can be converted to text for saving.
+// We need JsonSerializable interface in future.
+class TextedWorldPos {
+    var pos;
+    var dimension;
+    static var splitter = '_';
+    TextedWorldPos(pos, dimension) {
+        this.pos = pos;
+        this.dimension = dimension;
     }
-    return ret;
+    TextedWorldPos(pos) {
+        this.pos = pos;
+        this.dimension = Player.get().getDimension();
+    }
+    fun toText(){
+        return this.dimension + TextedWorldPos.splitter +  this.pos.getX() + ',' + this.pos.getY() + ',' + this.pos.getZ();
+    }
+    static fun fromText(text){
+        splittedResult = text.split(TextedWorldPos.splitter);
+        if (len(splittedResult) != 2) {
+            throw new Error('Cannot parse text '+ text);
+        }
+        return new TextedWorldPos(splittedResult.get(0), new Pos(splittedResult.get(1).split(',')));
+    }
+    static fun toText(pos) {
+        return new TextedWorldPos(pos).toText();
+    }
+    static fun toText(pos, world) {
+        return new TextedWorldPos(pos, dimension).toText();
+    }
 }
-fun iterateFun(reach, function, arguments){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    SxL = getIterator(sx-reach, sx+reach, 1);
-    SyL = getIterator(sy-reach, sy+reach, 1);
-    SzL = getIterator(sz-reach, sz+reach, 1);
-    foreach (Sx : SxL) {
-        foreach (Sy : SyL ) {
-            foreach (Sz : SzL) {
-                pos = new Pos(Sx,Sy,Sz);
-                box = function(pos, arguments);
-                if (box != null) {
-                    retVal.append(box);
-                }
+
+new GameEvent("onDimensionChange", fun(newWorld) {
+    client = MinecraftClient.getClient();
+    player = client.getPlayer();
+    center = player.getPos();
+    world = newWorld;
+    // Code
+});
+// clamp the box to the given Y.
+fun clampY(box, Y) {
+    p1 = box.pos1;
+    ex, ey, ez = box.pos2.toList();
+    ey = Math.min(Y, ey);
+    return new Box(p1, new Pos(ex, ey, ez));
+}
+setThreadSleepCheckInterval = fun (newInterval) {
+    threadSleepCheckInterval = newInterval;
+    player.message('Now check thread counts every '+ newInterval + 'ms');
+};
+setMinWorldHeight = fun(newHeight) {
+    minWorldHeight = newHeight;
+};
+setMaxWorldHeight = fun(newHeight) {
+    maxWorldHeight = newHeight;
+};
+setPrintLocation = fun(){
+    printLocations = !printLocations;
+};
+clearChunkCacheTask = fun () {
+    cachedChunks.clear();
+    player.message('All chunk cache is cleared');
+};
+clearChunkCacheItemTask = fun (item) {
+    if (!cachedChunks.containsKey(item)) return;
+    cachedChunks.remove(item);
+    player.message('All chunk cache is cleared');
+};
+suggesterChunkCacheTask = fun(args...){
+    return cachedChunks.getKeys();
+};
+loadSearchCacheTask = fun(){
+   file = new File(File.getDirectory().getAbsolutePath() + '/highlight_cachedChunks.json');
+   savedCachedChunks = Json.fromString(file.read()).getValue();
+   cachedChunks.putAll(savedCachedChunks);
+   player.message('Loaded search cache!');
+   player.message('Cached chunks will be excluded from search');
+};
+
+saveSearchCacheTask = fun(){
+    file = new File(File.getDirectory().getAbsolutePath() + '/highlight_cachedChunks.json');
+    Json.fromMap(cachedChunks).writeToFile(file);
+   player.message('Saved search cache!');
+   player.message('Cached chunks will be excluded from search');
+};
+fun refresh(){
+    player = client.getPlayer();
+    center = player.getPos();
+    world = client.getWorld();
+}
+fun isWithinRange(checkPos, p1, p2){
+    mx = Math.min(p1.getX(), p2.getX());
+    my = Math.min(p1.getY(), p2.getY());
+    mz = Math.min(p1.getZ(), p2.getZ());
+    ex = Math.max(p1.getX(), p2.getX());
+    ey = Math.max(p1.getY(), p2.getY());
+    ez = Math.max(p1.getZ(), p2.getZ());
+    return mx <= checkPos.getX() && ex >= checkPos.getX() && my <= checkPos.getY() && ey >= checkPos.getY() && mz <= checkPos.getZ() && ez >= checkPos.getZ() ;
+}
+fun stopAndRefreshRender(idx){
+    //player.message('Index '+ idx);
+    boxlist = tempRendering.get(idx);
+    foreach (boxes : boxlist){
+        boxes.render();
+    }
+    if (globalBoxesSet.containsKey(idx)){
+        box = globalBoxesSet.get(idx);
+        foreach (boxbefore : box){
+            //boxbefore.stopRendering();
+        }
+    }
+    globalBoxesSet.put(idx, tempRendering.get(idx));
+}
+//lambdaAsync should return area -> pos iterator -> function(pos, arguments) -> collection of apply(pos, function(pos, arguments))
+strategyPureArucas = fun (area, functions, args,  applyFunc) {
+    return fun () {
+        //threadName = 'Main';
+        threadName = Thread.getCurrentThread().getName();
+        collections = [];
+        total = area.getBlockCount();
+        _ii = 0;
+        percentage = 0;
+        foreach ( positions : world.getPositions(area.pos1, area.pos2)){
+            _ii ++;
+            currentPerc = Math.floor(_ii / total * 100);
+            if (currentPerc != percentage){
+                percentage = currentPerc;
+                //player.messageActionBar("["+ threadName + "]" + "Currently done "+ percentage+ '% of total block ' +total);
+            }
+            result = functions(positions, args);
+            if (result != false && result != null){
+                applied = applyFunc(positions, result);
+                collections.append(applied);
             }
         }
+        return collections;
+    };
+};
+//Iterates Area around player as xreach yreach zreach, checks functions, with additional argument(1), then maps value with apply, then collects
+fun iterateFunAsync(xreach,yreach, zreach, function, arguments, apply){
+    retVal = [];
+    centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    if(maxAround > 0){
+        centerAs = center;
     }
-    return retVal;
-}
-fun asString(position){
-    return ''+ position.getX().round() + ':'+ position.getY().round()+ ':' + position.getZ().round();
-}
-fun asBlockPos(string){
-    xyz = string.split(':');
-    return new Pos(xyz.get(0).toNumber(),xyz.get(1).toNumber(),xyz.get(2).toNumber());
-}
-fun renderBoxIf(position, containsString){
-    if (world.getBlockAt(position).getId().contains(containsString)){
-        box = new BoxShape(position);
-        box.setOutlineColor(255,0,0);
-        box.setOpacity(120);
-        box.setRenderThroughBlocks(true);
-        return box;
+    else {
+        centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
     }
+    sx = centerAs.getX().round();
+    xr = xreach;
+    yr = yreach;
+    zr = zreach;
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
+    if (maxAround != 0){
+        xr = Math.min(xreach, maxAround);
+        yr = Math.min(yreach, maxAround);
+        zr = Math.min(zreach, maxAround);
+    }
+    areas = null;
+    if (startPos != null && endPos != null){
+        areas = clampY(new Box(startPos, endPos), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    else {
+        areas = clampY(new Box(new Pos(sx-xr, sy-yr, sz-zr), new Pos(sx+xr, sy+yr, sz+zr)), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    tasks = [];
+    i = 0;
+    foreach (Area : areas){
+        currentidx = i;
+        lambdaAsync = strategyPureArucas(Area, function, arguments, apply);
+        task = new Task().then(fun(){result = lambdaAsync(); tempRendering.put(currentidx, result);}).then(fun(){stopAndRefreshRender(currentidx);return tempRendering.get(i);});
+        tasks.append(task);
+        i++;
+    }
+    future = new Futures(tasks);
+    return future;
 }
-fun renderBoxWhatever(position){
-    box = new BoxShape(position);
-    box.setColour(255,0,0);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
-    return box;
+fun iterateFunDirect(xreach,yreach, zreach, function, arguments, apply){
+    retVal = [];
+        centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    if(maxAround > 0){
+        centerAs = center;
+    }
+    else {
+        centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    }
+    sx = centerAs.getX().round();
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
+    streamInit = BlockPos.iterate(BlockPos(new Pos(sx-xreach, sy-yreach, sz-zreach)), BlockPos(new Pos(sx+xreach, sy+yreach, sz+zreach))).spliterator();
+    return StreamSupport.stream(streamInit, Java.valueOf(false)).
+                filter(Java.predicateOf(fun(a){ val = function(a, arguments); return val != false && val != null;})).
+                map(Java.functionOf(fun(a){return apply(a, function(a, arguments));})).
+                filter(Java.predicateOf(fun(a){return a != false && a != null;})).
+                collect(Collector.toList()).toArucas();
+
 }
-fun renderBoxWhateverColor(position, colorA, colorB, colorC){
-    box = new BoxShape(position);
-    box.setColour(colorA, colorB, colorC);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
-    return box;
+
+fun threadRunner(function){
+    valueHolder = null;
+    Thread.runThreaded(fun(){valueHolder = function();});
+    return valueHolder;
 }
+fun iterateFunLazy(xreach,yreach, zreach, function, arguments, apply){
+ retVal = [];
+    centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    if(maxAround > 0){
+        centerAs = center;
+    }
+    else {
+        centerAs = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    }
+    sx = centerAs.getX().round();
+    xr = xreach;
+    yr = yreach;
+    zr = zreach;
+    sy = centerAs.getY().round();
+    sz = centerAs.getZ().round();
+    if (maxAround != 0){
+        xr = Math.min(xreach, maxAround);
+        yr = Math.min(yreach, maxAround);
+        zr = Math.min(zreach, maxAround);
+    }
+    areas = null;
+    if (startPos != null && endPos != null){
+        areas = clampY(new Box(startPos, endPos), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    else {
+        areas = clampY(new Box(new Pos(sx-xr, sy-yr, sz-zr), new Pos(sx+xr, sy+yr, sz+zr)), maxWorldHeight).divideBy(xThreads,yThreads,zThreads, true);
+    }
+    tasks = {};
+    i = 0;
+    foreach (Area : areas){
+        currentidx = i;
+        lambdaAsync = strategyPureArucas(Area, function, arguments, apply);
+        while (tasks.size() >= maxSearchThreadCount || tasks.get(currentidx) != null){
+            //Player.get().messageActionBar("Waiting for threads to finish, current task count: " + tasks + "");
+            sleep(100);
+        }
+        //Player.get().messageActionBar("Starting new thread, current task count: " + tasks + "");
+        Thread.runThreaded(fun () {
+            b = currentidx;
+            while (tasks[b] != null){
+                //Player.get().messageActionBar("Waiting for threads to finish, current task index: " + b + "");
+                sleep(100);
+            }
+            tasks[b] = true;
+            result = lambdaAsync();
+            tempRendering.put(b, result);
+            //Player.get().messageActionBar("Thread finished, current task index: " + b + "");
+            stopAndRefreshRender(b);
+            //Player.get().messageActionBar("Refreshed render, current task index: " + b + "");
+            tasks.remove(b);
+            return tempRendering.get(b);
+        });
+        i++;
+    }
+    while (tasks.size() > 0){
+        //Player.get().messageActionBar("Waiting for all threads to finish, current task " + tasks + "");
+        sleep(100);
+    }
+    return;
+}
+
+compareStrategy = 'compare';
+compareOptions = {
+    'compare' : fun (a,b) {return a.contains(b);},
+    'exact' : fun (a,b) {return a == b;}
+};
+strategy = 'Lazy';
+options = {'Async' : iterateFunAsync, 'Lazy' : iterateFunLazy, 'Direct' : iterateFunDirect};
 fun renderBoxWhateverColorFromMap(position, color){
     box = new BoxShape(position);
-    colorA = color.get(0);
-    colorB = color.get(1);
-    colorC = color.get(2);
-    box.setColour(colorA, colorB, colorC);
-    box.setOutlineColor(0,0,0);
-    box.setOpacity(20);
-    box.setOutlinePixelWidth(15);
-    box.setRenderThroughBlocks(true);
+    globalBlockPositions.put(position, box);
+    box.setColour(color.hex);
+    if (outlinePixelWidth > 0){
+        box.setOutlineColor(outlineColor);
+        box.setOutlinePixelWidth(outlinePixelWidth);
+    }
+    if (color.notify){
+        if (!positionHashSet.contains(position)){
+            positionHashSet.add(position);
+            player.message('Found '+ color.name+ ' at '+ position);
+        }
+    }
+    box.setOpacity(color.opacity);
+    box.setRenderThroughBlocks(renderThroughBlocks);
     return box;
 }
-fun iterateFunJava(reach, arguments){
+fun iterateFunJavaPredicateColored(coloredfunction, mapping){
     retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
-    foreach( pos: area){
-        retVal.append(renderBoxWhatever(pos));
-    }
-    return retVal;
-}
-fun iterateFunJavaColorMapping(reach, arguments){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    area = world.getAreaMatch(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), arguments);
-    foreach( Obj: area){
-        retVal.append(renderBoxWhateverColorFromMap(Obj.get(0), Obj.get(1)));
-    }
-    return retVal;
-}
-fun getOptional(map, what){
-    if (map == null || !map.instanceOf("Map") || map.get(what) == null){
-        return null;
-    }
-    return map.get(what);
-}
-fun predicateEntity(position){
-    posBlock = world.getBlockAt(position);
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'storedStack');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('id').contains(string);
-}
-fun predicateEntity2(position){
-    posBlock = world.getBlockAt(position);
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'SpawnData');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('entity').get('id').contains('zombie');
-}
-fun predicateEntity3(position){
-    posBlock = world.getBlockAt(position);
-    cond1 = posBlock.getId().contains('something');
-    if(!cond1){
-        return false;
-    }
-    map = posBlock.getBlockEntityData();
-    optional = getOptional(map, 'Items');
-    if (optional == null){
-        return false;
-    }
-    return optional.get('Items').get(0).get('id').contains('item_');
-}
-fun iterateFunJavaPredicate(reach, function){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
-    area = world.getArea(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach));
-    foreach( pos: area){
-        if(function(pos)){
-            retVal.append(renderBoxWhatever(pos));
-        }
-    }
-    return retVal;
-}
-fun iterateFunJavaPredicateColored(reach, coloredfunction, mapping){
-    retVal = [];
-    sx = player.getX().round();
-    sy = player.getY().round();
-    sz = player.getZ().round();
-    //area = world.getAreaPredicate(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach), function);
-    area = world.getArea(new Pos(sx-reach, sy-reach, sz-reach), new Pos(sx+reach, sy+reach, sz+reach));
-    foreach( pos: area){
-        color = coloredfunction(pos, mapping);
-        if(color != false){
-            retVal.append(renderBoxWhateverColorFromMap(pos, color));
-        }
-    }
-    return retVal;
+    func = options.get(strategy);
+    return func(xreach,yreach, zreach, coloredfunction, mapping, renderBoxWhateverColorFromMap);
 }
 fun getDistanceTo(pos){
     return ((player.getX() - pos.getX()) ^2 + (player.getY() - pos.getY()) ^2+(player.getZ() - pos.getZ()) ^2)^0.5;
 }
-fun highlightJava(string) {
-    range = 24;
-    globalBoxes = iterateFunJava(range, string);
-    while (true){
-        foreach (boxes : globalBoxes){
+
+fun renderBoxes(b){
+    if (Type.of(b).getName() == 'Futures' || Type.of(b).getName() == 'SplittedFutures'){
+        return b.then(fun (boxHolder){
+            foreach (box : boxHolder){
+                box.render();
+            }
+            return boxHolder;
+        });
+    }
+    else {
+        foreach (boxes : b){
             boxes.render();
         }
-        globalBoxesNext = iterateFunJava(range,  string);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
+        return b;
     }
 }
-fun highlightJavaPredicate(predicate) {
-    range = 24;
-    globalBoxes = iterateFunJavaPredicate(range, predicate);
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFunJavaPredicate(range,  predicate);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
+fun stopRenderBoxesWhen(b, reference){
+    if (Type.of(b).getName() == 'Futures' || Type.of(b).getName() == 'SplittedFutures'){
+        return b.then(fun (boxHolder){
+            reference.await();
+            foreach (box : boxHolder){
+                box.stopRendering();
+            }
+            return boxHolder;
+        });
+    }
+    else {
+        foreach (boxes : b){
             boxes.stopRendering();
         }
-        globalBoxes = globalBoxesNext;
+        return b;
     }
 }
 fun highlightJavaPredicateColor(predicate, mapping) {
-    reach = 24;
-    globalBoxes = iterateFunJavaPredicateColored(reach, predicate, mapping);
+    boxes = iterateFunJavaPredicateColored(predicate, mapping);
+    //renderHolder = renderBoxes(boxes);
+    st = getMilliTime();
+    nextRender = null;
+    sleep(50);
     while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
+        if (renderOnce){
+            Refresh = false;
+            renderOnce = false;
+            player.messageActionBar("Scheduled Rendering, will sleep, wait....");
         }
-        globalBoxesNext = iterateFunJavaPredicateColored(reach, predicate, mapping);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
+        globalBoxesNext = iterateFunJavaPredicateColored(predicate, mapping);
+        player.messageActionBar("Search/Rendering for " + ((2* xreach+1) *(2* yreach+1) *(2* zreach+1) ) + " blocks took " + (getMilliTime() - st)+ "ms with Thread count " + (xThreads * yThreads * zThreads));
+        st = getMilliTime();
+        //nextRender = renderBoxes(globalBoxesNext);
+        //stopRenderBoxesWhen(renderHolder, nextRender).join();
+        while (!Refresh){
+            sleep(50);
+            if (renderOnce){
+                Refresh = true;
+            }
         }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
+        sleep(minSearchInterval);
+        //renderHolder.await();
+        //renderHolder = nextRender;
     }
 }
-fun highlight(string) {
-    range = 128;
-    globalBoxes = iterateFun(range,renderBoxIf, string);
-    while (true){
-        foreach (boxes : globalBoxes){
-            boxes.render();
-        }
-        globalBoxesNext = iterateFun(range, renderBoxIf,  string);
-        foreach (boxes : globalBoxesNext){
-            boxes.render();
-        }
-        foreach (boxes : globalBoxes){
-            boxes.stopRendering();
-        }
-        globalBoxes = globalBoxesNext;
-    }
-}
+
 fun predicateMap(position, mappings) {
+    if (globalBlockPositions.containsKey(position)){
+        return null;
+    }
     id = world.getBlockAt(position).getId();
     // Flexible containsString
     foreach (values : mappings.getKeys()){
-        if (id.contains(values)){
+        if(Type.of(values).getName() != 'String'){
+            if(Type.of(values).getName() == 'Function'){
+                if (values(position)){
+                    return mappings.get(values);
+                }
+            }
+            continue;
+        }
+        if ((compareOptions.get(compareStrategy))(id, values)){
             return mappings.get(values);
         }
     }
@@ -255,23 +437,1033 @@ fun predicateMap(position, mappings) {
     // if (mapping.contains(id)){
     //    return mapping.get(id);
     // }
-    return false;
+    return null;
+}
+fun generatePredicateLightLevelAndSolidAtPos(lightlevel){
+   ret = fun (position){
+        if (globalBlockPositions.containsKey(position)){
+            return null;
+        }
+        bool1 = world.getBlockAt(position).isReplaceable() && world.getBlockAt(position.add(0,1,0)).isReplaceable() && world.getLight(position) < lightlevel;
+        if(!bool1){
+            return false;
+        }
+         offsetBlock = world.getBlockAt(position.add(0,-1,0));
+         if (spawnableBlockMapping.get(offsetBlock.getId()) != null){
+            return true;
+         }
+         return null;
+   };
+   return ret;
+}
+fun getModifiedPredicate(blockValue) {
+    blockName = blockValue.getId();
+    defaultState = blockValue.getDefaultState();
+    defaultNbt = {};
+    targetNbt = {};
+    try {
+        defaultNbt = defaultState.getBlockEntityNbt();
+        targetNbt = blockValue.getBlockEntityNbt();
+    }
+    catch (e) {
+
+    }
+    targetBlockProperties = blockValue.getBlockProperties();
+    defaultBlockProperties = defaultState.getBlockProperties();
+    predicate = predicateBlock(blockName);
+    foreach (keys : targetBlockProperties.getKeys()){
+        if (targetBlockProperties.get(keys) != defaultBlockProperties.get(keys)){
+            predicate = Predicate.and(predicate, predicateBlockProperty(blockName, keys, targetBlockProperties.get(keys)));
+        }
+    }
+    foreach (keys : targetNbt.getKeys()){
+        if (targetNbt.get(keys) != defaultNbt.get(keys)){
+            predicate = Predicate.and(predicate, predicateBlockProperty(blockName, keys, targetNbt.get(keys)));
+        }
+    }
+    return predicate;
 }
 
-fun predicate(position){
-    id = world.getBlockAt(position).getId();
-    //return id.contains('spawner');
-    return id.contains('stone');
+fun predicateBlock (id) {
+    return fun (position){
+        if (globalBlockPositions.containsKey(position)){
+            return null;
+        }
+        return world.getBlockAt(position).getId() == id;
+    };
 }
 
+fun predicateBlockProperty (id, prop, value) {
+    return fun (position){
+        if (globalBlockPositions.containsKey(position)){
+            return null;
+        }
+        block = world.getBlockAt(position);
+        if (id == block.getId()){
+            properties = block.getBlockProperties();
+            if (properties.get(prop) == value){
+                return true;
+            }
+        }
+        return false;
+    };
+}
 
-
-mapping = {
-    'diamond' : [0, 216, 255],
-    'redstone' : [255,0,0],
-    'gold' : [255,224,0]
+fun predicateBiome(biomeName){
+    return fun (position){
+        if (globalBlockPositions.containsKey(position)){
+            return null;
+        }
+        biome = world.getBiomeAt(position).getId();
+        if ((compareOptions.get(compareStrategy))(biome, biomeName)){
+            return true;
+        }
+        return false;
+    };
+}
+// variable RGB class
+class VarRGB : RGBColor {
+    var R;
+    var G;
+    var B;
+    var hex;
+    var opacity;
+    //optional
+    var name = null;
+    var notify = false;
+    VarRGB(r,g,b){
+        this.R = r;
+        this.G = g;
+        this.B = b;
+        this.hex = b+ 256 * g + 65536 * r;
+        this.opacity = opacity;
+    }
+    VarRGB(r,g,b, o) {
+        this.R = r;
+        this.G = g;
+        this.B = b;
+        this.hex = b+ 256 * g + 65536 * r;
+        this.opacity = o;
+    }
+    fun getR(){
+        return this.r;
+    }
+    fun getG(){
+        return this.g;
+    }
+    fun getB(){
+        return this.b;
+    }
+    fun toList(){
+        return [this.r, this.g, this.b, this.opacity];
+    }
+    static fun fromList(value){
+        if (len(value) == 3){
+            return new VarRGB(value.get(0), value.get(1), value.get(2));
+        }
+        return new VarRGB(value.get(0), value.get(1), value.get(2), value.get(3));
+    }
+    static fun fromRGB(rgb) {
+        return new VarRGB(rgb.R, rgb.G, rgb.B);
+    }
+    fun getHexCode(){
+        return this.hex;
+    }
+}
+//tasks
+setCenterTask = fun (x,y,z){
+    setCenter = true;
+    center = new Pos(x,y,z);
+    player.message("Center position is fixed to "+ center);
+};
+setCenterFollowTask = fun (){
+    setCenter = true;
+    center = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    player.message("Center position is fixed to "+ center);
+};
+centerOffTask = fun (){
+    setCenter = false;
+    player.message("Center is automatically set to player");
+};
+xdistanceTask = fun (newVal){
+    if((2* newVal+1) *(2* yreach+1) *(2* zreach+1) > safetyLimit){
+        player.message("Block Area count of " +((2* xreach+1) *(2* yreach+1) *(2* zreach+1)) + " will exceed safety count " + safetyLimit);
+        return;
+    }
+    if(newVal > 0){
+        xreach = newVal;
+    }
+};
+ydistanceTask = fun (newVal){
+    if((2* xreach+1) *(2* newVal+1) *(2* zreach+1) > safetyLimit){
+        player.message("Block Area count of " +((2* xreach+1) *(2* yreach+1) *(2* zreach+1)) + " will exceed safety count " + safetyLimit);
+        return;
+    }
+    if(newVal > 0){
+        yreach = newVal;
+    }
+};
+zdistanceTask = fun (newVal){
+    if((2* xreach+1) *(2* yreach+1) *(2* newVal+1) > safetyLimit){
+        player.message("Block Area count of " +((2* xreach+1) *(2* yreach+1) *(2* zreach+1)) + " will exceed safety count " + safetyLimit);
+        return;
+    }
+    if(newVal > 0){
+        zreach = newVal;
+    }
+};
+setMaxAroundPlayerTask = fun (newVal){
+    if (newVal >= 0){
+        maxAround = newVal;
+        player.message("Will only render blocks around player within : "+ newVal + "(0 allows infinite)");
+    }
+};
+xThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        xThreads = newVal;
+    }
+};
+yThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        yThreads = newVal;
+    }
+};
+zThreadChangeTask = fun (newVal){
+    if(newVal > 0){
+        zThreads = newVal;
+    }
+};
+safetyCountTask = fun (newVal){
+    safetyLimit = newVal;
+    player.message("Safety count is now set to " + safetyLimit);
+};
+addSearchTask = fun (newVal,colour){
+    colour = VarRGB.fromRGB(colour);
+    mapping.put(newVal, colour);
+    //Refresh = true;
+    player.message("Toggled " +newVal + " search");
+};
+addSearchOpacityTask = fun (newVal,colour, opacityValue){
+    colour = VarRGB.fromRGB(colour);
+    colour.opacity = opacityValue;
+    mapping.put(newVal, colour);
+    //Refresh = true;
+    player.message("Toggled " +newVal + " search");
+};
+addSearchOpacityStateTask = fun (blockValue, colour, opacityValue){
+    _mapIdx = 0;
+    accessKey = blockValue.getId() + "_advanced_" + _mapIdx;
+    while (functionMapping.containsKey(accessKey)) {
+        _mapIdx++;
+        accessKey = blockValue.getId() + "_advanced_" + _mapIdx;
+    }
+    predicateKey = getModifiedPredicate(blockValue);
+    colour = VarRGB.fromRGB(colour);
+    mapping.put(predicateKey, colour);
+    functionMapping.put(accessKey, predicateKey);
+    colour.opacity = opacityValue;
+    //Refresh = true;
+    player.message("Toggled " +accessKey + " search");
+};
+addSearchStateTask = fun (blockValue, colour){
+    _mapIdx = 0;
+    accessKey = blockValue.getId() + "_advanced_" + _mapIdx;
+    while (functionMapping.containsKey(accessKey)) {
+        _mapIdx++;
+        accessKey = blockValue.getId() + "_advanced_" + _mapIdx;
+    }
+    predicateKey = getModifiedPredicate(blockValue);
+    colour = VarRGB.fromRGB(colour);
+    mapping.put(predicateKey, colour);
+    functionMapping.put(accessKey, predicateKey);
+    //Refresh = true;
+    player.message("Toggled " +accessKey + " search");
+};
+saveListTask = fun (args...){
+   file = new File(File.getDirectory().getAbsolutePath() + '/highlight.json');
+   mapping_fixed = {};
+   foreach(strings: mapping){
+       value = mapping.get(strings);
+       if (value.instanceOf(List.type)){
+           mapping_fixed.put(strings, value);
+       }
+       else if (value.instanceOf(Colors.type)){
+           mapping_fixed.put(strings, value.toList());
+       }
+       else if (value.instanceOf(RGBColor.type)){
+           mapping_fixed.put(strings, [value.R, value.G, value.B]);
+       }
+   }
+   Json.fromMap(mapping_fixed).writeToFile(file);
+   player.message('File written to '+ file.getAbsolutePath());
+};
+loadListTask = fun (args...){
+   file = new File(File.getDirectory().getAbsolutePath() + '/highlight.json');
+   mapping_fixed = Json.fromString(file.read()).getValue();
+   foreach (keys : mapping_fixed){
+       value = mapping_fixed.get(keys);
+       mapping.put(keys, VarRGB.fromList(value));
+   }
+   player.message('File loaded from '+ file.getAbsolutePath());
+};
+addSearchRGBTask = fun (newVal,r,g,b){
+    mapping.put(newVal, new VarRGB(r,g,b));
+    //Refresh = true;
+    player.message("Toggled " +newVal + " search");
+};
+addSearchRGBOpacityTask = fun (newVal,r,g,b, o){
+    mapping.put(newVal, new VarRGB(r,g,b,o));
+    //Refresh = true;
+    player.message("Toggled " +newVal + " search");
 };
 
-//highlightJavaPredicate(predicate);
+renderOnceTask = fun (){
+    if(renderOnce){
+        player.message("Already handling render!");
+        return;
+    }
+    renderOnce = true;
+    Refresh = true;
+    player.message("Will render once");
+};
 
-highlightJavaPredicateColor(predicateMap, mapping);
+//pos -> shape
+manualSearchBlocks = {
+
+};
+cleanSearchCache = fun(){
+    foreach(key : manualSearchBlocks.getKeys()){
+        manualSearchBlocks.get(key).stopRendering();
+        manualSearchBlocks.remove(key);
+    }
+    foreach(key : globalBlockPositions.getKeys()){
+        globalBlockPositions.get(key).stopRendering();
+        globalBlockPositions.remove(key);
+    }
+};
+
+fun checkCache(){
+    foreach (mappers : [manualSearchBlocks, globalBlockPositions]){
+        foreach (blocks : mappers.getKeys()) {
+            if (world.isLoaded(blocks) && world.isAir(blocks)){
+                mappers.get(blocks).stopRendering();
+            }
+        }
+    }
+}
+new GameEvent("onBlockBroken", fun(block) {
+    blockPos = block.getPos();
+    checkCache();
+    if (manualSearchBlocks.containsKey(blockPos)){
+        manualSearchBlocks.get(blockPos).stopRendering();
+        //manualSearchBlocks.remove(key);
+    }
+    if (globalBlockPositions.containsKey(blockPos)){
+        globalBlockPositions.get(blockPos).stopRendering();
+        //globalBlockPositions.remove(key);
+    }
+    foreach (directions : Direction.getAllDirections()){
+        key = blockPos.offset(directions);
+        if (world.isLoaded(key) && world.isAir(key)){
+            if (manualSearchBlocks.containsKey(key)){
+                manualSearchBlocks.get(key).stopRendering();
+                //manualSearchBlocks.remove(key);
+            }
+            if (globalBlockPositions.containsKey(key)){
+                globalBlockPositions.get(key).stopRendering();
+                //globalBlockPositions.remove(key);
+            }
+        }
+
+    }
+
+}).register();
+
+mapping = {
+    //'warped' : [0, 216, 255],
+    //'diamond' : [0, 216, 255],
+    //'redstone' : [255,0,0],
+    //'gold' : [255,224,0],
+    // 'ender_chest' : [0,0,255],
+    // 'ancient' : [255,124,0],
+    // 'bee_nest' : [255,224,0]
+};
+functionMapping = {
+
+
+
+};
+
+spawnableBlockMapping = {
+
+};
+opacityMapping = {
+
+};
+addSearchAdvanceTask = fun (newVal, propertyName, propertyValue, colour) {
+    accessKey = newVal + "_" + propertyName +'_'+ propertyValue ;
+    predicateKey = predicateBlockProperty(newVal, propertyName, PropertySuggester.parseValue(propertyValue));
+    colour = VarRGB.fromRGB(colour);
+    mapping.put(predicateKey, colour);
+    functionMapping.put(accessKey, predicateKey);
+    //Refresh = true;
+    player.message("Toggled " + newVal + "[" + propertyName +':'+ propertyValue + "] search");
+};
+addSearchBiomeTask = fun (biomeName, colour) {
+    predicateKey = predicateBiome(biomeName.lowercase());
+    colour = VarRGB.fromRGB(colour);
+    mapping.put(predicateKey, colour);
+    functionMapping.put(biomeName, predicateKey);
+    //Refresh = true;
+    player.message("Toggled " + "Biome[" + biomeName + "] search");
+};
+addSearchAdvanceOpacityTask = fun (newVal, propertyName, propertyValue, colour, opacityValue) {
+    accessKey = newVal + "_" + propertyName +'_'+ propertyValue ;
+    predicateKey = predicateBlockProperty(newVal, propertyName, PropertySuggester.parseValue(propertyValue));
+    colour = VarRGB.fromRGB(colour);
+    colour.opacity = opacityValue;
+    mapping.put(predicateKey, colour);
+    functionMapping.put(accessKey, predicateKey);
+    //Refresh = true;
+    player.message("Toggled " + newVal + "[" + propertyName +':'+ propertyValue + "] search");
+};
+addSearchBiomeOpacityTask = fun (biomeName, colour, opacityValue) {
+    predicateKey = predicateBiome(biomeName.lowercase());
+    colour = VarRGB.fromRGB(colour);
+    colour.opacity = opacityValue;
+    mapping.put(predicateKey, colour);
+    functionMapping.put(biomeName, predicateKey);
+    //Refresh = true;
+    player.message("Toggled " + "Biome[" + biomeName + "] search");
+};
+removeSearchTask = fun (val){
+    if (mapping.getKeys().contains(val)){
+        mapping.remove(val);
+        player.message("Removed " +val + " search");
+    }
+};
+notifySearchTask = fun (val, bool){
+    if (mapping.getKeys().contains(val)){
+        value = mapping.get(val);
+        value.notify = bool;
+        value.name = val;
+        player.message("Now notifying " +val + " is set to " + value.notify);
+    }
+};
+notifySearchToggleTask = fun (val){
+    if (mapping.getKeys().contains(val)){
+        value = mapping.get(val);
+        value.notify = !value.notify;
+        value.name = val;
+        player.message("Now notifying " +val + " is set to " + value.notify);
+    }
+};
+setOpacityTask = fun (newOpacity){
+    opacity = newOpacity;
+    player.message("Opacity is now set to "+ newOpacity + " 0-Transluent, 255 - Full");
+};
+setOutlinePixelWidth = fun (newValue){
+    outlinePixelWidth = newValue;
+    player.message("outline pixel width is now set to "+ newValue + " 0- No outline");
+};
+setOutlineColorFromRGB = fun (newValue){
+    outlineColor = newValue.hex;
+    player.message("outline color is now set to "+ newValue.getName());
+};
+setRenderThroughBlocks = fun (newValue){
+    renderThroughBlocks = newValue;
+    player.message("Render through block is now set to "+ newValue);
+};
+setStrategyTask = fun (newStrategy){
+    if (options.get(newStrategy) != null){
+        strategy = newStrategy;
+        player.message("New strategy : " + strategy);
+    }
+};
+setCompareStrategyTask = fun (newStrategy){
+    if (compareOptions.get(newStrategy) != null){
+        compareStrategy = newStrategy;
+        player.message("New compare strategy : " + compareStrategy);
+    }
+};
+setMaxDistanceTask = fun (newDistance){
+    maxDistance = newDistance;
+    xreach = maxDistance;
+    yreach = maxDistance;
+    zreach = maxDistance;
+    player.message("Max distance is set to : "+ maxDistance);
+};
+addSpwanableBlockTask = fun (blockName){
+    spawnableBlockMapping.put(blockName, true);
+    player.message("Added spawnable block : "+ blockName);
+};
+removeSpwanableBlockTask = fun (blockName){
+    spawnableBlockMapping.remove(blockName);
+    player.message("Removed spawnable block : "+ blockName);
+};
+searchOnceTask = fun (blockName){
+    r = 128;
+    searchRadiusOnceTask(blockName, r);
+
+};
+searchRadiusOnceTask = fun (blockName, radius){
+    searchRadiusOnceMaxTask(blockName, radius, 1);
+};
+fun getAliveThreadCount(threading) {
+    aliveThread = 0;
+    threadidx = 0;
+    for(i = 0; i < len(threading); i++){
+        shouldIncrement = true;
+        runningThread = threading.get(threadidx);
+        if (runningThread == null) {
+            return aliveThread;
+        }
+        if (runningThread.isAlive()){
+            aliveThread ++;
+        }
+        else {
+            threading.remove(threadidx);
+            shouldIncrement = false;
+        }
+        if (shouldIncrement) threadidx++;
+    }
+    return aliveThread;
+}
+isCached = fun (accessKey){
+    pos = player.getPos().asCentre().subtract(0.5, 0.5, 0.5);
+    chunkpos = Chunk.fromPos(pos).getChunkPos();
+    isCached = false;
+    if (cachedChunks.get(accessKey) != null) {
+        isCached = cachedChunks.get(accessKey).get(TextedWorldPos.toText(chunkpos));
+    }
+    else {
+        player.message('Invalid access key' + accessKey);
+    }
+    if (isCached == true) {
+        player.message('Current chunk '+ chunkpos + ' is marked empty for ' + accessKey);
+    }
+    else {
+        player.message('Current chunk '+ chunkpos + ' is not marked empty for ' + accessKey);
+    }
+};
+isCachedBlockPos = fun (accessKey, x, y, z){
+    chunkpos = Chunk.fromPos(x, y, z).getChunkPos();
+    isCached = false;
+    if (cachedChunks.get(accessKey) != null) {
+        isCached = cachedChunks.get(accessKey).get(TextedWorldPos.toText(chunkpos));
+    }
+    else {
+        player.message('Invalid access key' + accessKey);
+    }
+    if (isCached == true) {
+        player.message('Current chunk '+ chunkpos + ' is marked empty for ' + accessKey);
+    }
+    else {
+        player.message('Current chunk '+ chunkpos + ' is not marked empty for ' + accessKey);
+    }
+};
+setMaxSearchThreadCount = fun (newCount) {
+    maxSearchThreadCount = newCount;
+    player.message('Now search thread count is '+ newCount);
+};
+
+searchRadiusOnceMaxTask = fun (blockName, radius, maxcount){
+    if (cachedChunks.get(blockName) == null) {
+        cachedChunks.put(blockName, {});
+    }
+    Thread.runThreaded('Search Main Thread',
+        fun() {
+            sx, sy, sz = player.getPos().asCentre().subtract(0.5, 0.5, 0.5).subtract(radius, radius, radius).toList();
+            sy = Math.max(minWorldHeight, sy);
+            ex, ey, ez = player.getPos().asCentre().subtract(0.5, 0.5, 0.5).add(radius, radius, radius).toList();
+            ey = Math.min(maxWorldHeight, ey);
+            pos1 = new Pos(sx, sy, sz);
+            pos2 = new Pos(ex, ey, ez);
+            _i = 0;
+            cx, cy, cz = Chunk.fromPos(pos2).getChunkPos().subtract(Chunk.fromPos(pos1).getChunkPos()).toList();
+            totalChunks = (cx + 1) * (cy + 1) * (cz + 1);
+            _thread = 0;
+            _cpscounter = 0;
+            _skipped = 0;
+            threads = [];
+            started = getMilliTime();
+            foreach (areas : clampY(new Box(pos1, pos2), maxWorldHeight).divideBlock(16, 16, 16, true)){
+                chunk = Chunk.fromPos(areas.center);
+                chunkMapping = cachedChunks.get(blockName);
+                if (chunkMapping.get(TextedWorldPos.toText(chunk.getChunkPos())) == true) {
+                     //cached
+                     _skipped++;
+                    continue;
+                }
+                while (getAliveThreadCount(threads) > maxSearchThreadCount) {
+                    elapsed = getMilliTime() - started;
+                    cps = _cpscounter / elapsed * 1000;
+                    if (cps < 100) {
+                        cps = (cps * 100).round() / 100;
+                    }
+                    else if (cps < 1000) {
+                        cps = (cps * 10).round() / 10;
+                    }
+                    else {
+                        cps = cps.round();
+                    }
+                    
+                    player.messageActionBar('Waiting for thread stop... chunk ' + (_thread + _skipped) + '/' + totalChunks + ' ('+cps + ' chunks / s)' + '(skipped ' + _skipped + ' chunks)');
+                    sleep(threadSleepCheckInterval);
+                }
+                if (Math.mod(_thread, 100) == 0) {
+                    _cpscounter = 0;
+                    started = getMilliTime();
+                }
+                searchThread = Thread.runThreaded('Search Thread_' + _thread,
+                    fun () {
+                        _iLocal = 0;
+                        shouldStop = false;
+                        foreach (positions : chunk){
+                            if (shouldStop) break;
+                            if (!world.isLoaded(positions)) Thread.getCurrentThread().stop();
+                            if (world.isAir(positions)) continue;
+                            if (world.getBlockAt(positions).getId().contains(blockName)){
+                                if (globalBlockPositions.containsKey(positions) || manualSearchBlocks.containsKey(positions)) continue;
+                                if (printLocations) player.message("Found " + world.getBlockAt(positions).getId() +" at : "+ positions);
+                                px, py, pz = positions.toList();
+                                box = new BoxShape(new Pos(Math.floor(px), Math.floor(py), Math.floor(pz)));
+                                box.setColour(Configs.get('searchBlockColour').hex);
+                                box.setOpacity(Configs.get('searchBlockOpacity'));
+                                box.setRenderThroughBlocks(true);
+                                box.render();
+                                hadValue = manualSearchBlocks.put(positions,
+                                    box
+                                );
+                                if (hadValue == null) _iLocal++;
+                            }
+                            if (maxcount != -1 && (_i >= maxcount || _iLocal >= maxcount)){
+                                player.messageActionBar(Thread.getCurrentThread().getName() + " : Finished finding "+ blockName);
+                                _i = _i + _iLocal;
+                                shouldStop = true;
+                                Thread.getCurrentThread().stop();
+                            }
+                        }
+                        //finally
+                        _i = _i + _iLocal;
+                        if (_iLocal == 0) chunkMapping.put(TextedWorldPos.toText(chunk.getChunkPos()), true);
+                        Thread.getCurrentThread().stop();
+                    }
+                );
+                threads.append(searchThread);
+                _thread++;
+                _cpscounter++;
+            }
+            while (getAliveThreadCount(threads) > 0) {
+                player.messageActionBar('[Search thread] Waiting for thread stop...');
+                sleep(50);
+            }
+            player.message("[Search thread] Terminated finding "+ blockName + 'Found : '+ _i);
+            Thread.getCurrentThread().stop();
+        }
+    );
+
+};
+
+// blockName = regex;
+searchWithRegexTask = fun ( radius, maxcount, blockName){
+    if (cachedChunks.get(blockName) == null) {
+        cachedChunks.put(blockName, {});
+    }
+    Thread.runThreaded('Search Main Thread',
+        fun() {
+            sx, sy, sz = player.getPos().asCentre().subtract(0.5, 0.5, 0.5).subtract(radius, radius, radius).toList();
+            sy = Math.max(minWorldHeight, sy);
+            ex, ey, ez = player.getPos().asCentre().subtract(0.5, 0.5, 0.5).add(radius, radius, radius).toList();
+            ey = Math.min(maxWorldHeight, ey);
+            pos1 = new Pos(sx, sy, sz);
+            pos2 = new Pos(ex, ey, ez);
+            _i = 0;
+            cx, cy, cz = Chunk.fromPos(pos2).getChunkPos().subtract(Chunk.fromPos(pos1).getChunkPos()).toList();
+            totalChunks = (cx + 1) * (cy + 1) * (cz + 1);
+            _thread = 0;
+            _cpscounter = 0;
+            _skipped = 0;
+            threads = [];
+            started = getMilliTime();
+            foreach (areas : clampY(new Box(pos1, pos2), maxWorldHeight).divideBlock(16, 16, 16, true)){
+                chunk = Chunk.fromPos(areas.center);
+                chunkMapping = cachedChunks.get(blockName);
+                if (chunkMapping.get(TextedWorldPos.toText(chunk.getChunkPos())) == true) {
+                     //cached
+                     _skipped++;
+                    continue;
+                }
+                while (getAliveThreadCount(threads) > maxSearchThreadCount) {
+                    elapsed = getMilliTime() - started;
+                    cps = _cpscounter / elapsed * 1000;
+                    if (cps < 100) {
+                        cps = (cps * 100).round() / 100;
+                    }
+                    else if (cps < 1000) {
+                        cps = (cps * 10).round() / 10;
+                    }
+                    else {
+                        cps = cps.round();
+                    }
+                    
+                    player.messageActionBar('Waiting for thread stop... chunk ' + (_thread + _skipped) + '/' + totalChunks + ' ('+cps + ' chunks / s)' + '(skipped ' + _skipped + ' chunks)');
+                    sleep(threadSleepCheckInterval);
+                }
+                if (Math.mod(_thread, 100) == 0) {
+                    _cpscounter = 0;
+                    started = getMilliTime();
+                }
+                searchThread = Thread.runThreaded('Search Thread_' + _thread,
+                    fun () {
+                        _iLocal = 0;
+                        foreach (positions : chunk){
+                            if (!world.isLoaded(positions)) Thread.getCurrentThread().stop();
+                            if (world.isAir(positions)) continue;
+                            if (world.getBlockAt(positions).getId().matches(blockName)){
+                                if (globalBlockPositions.containsKey(positions) || manualSearchBlocks.containsKey(positions)) continue;
+                                if (printLocations) player.message("Found " + world.getBlockAt(positions).getId() +" at : "+ positions);
+                                px, py, pz = positions.toList();
+                                box = new BoxShape(new Pos(Math.floor(px), Math.floor(py), Math.floor(pz)));
+                                box.setColour(Configs['searchBlockColour'].hex);
+                                box.setOpacity(Configs['searchBlockOpacity']);
+                                box.setRenderThroughBlocks(true);
+                                box.render();
+                                hadValue = manualSearchBlocks.put(positions,
+                                    box
+                                );
+                                if (hadValue == null) _iLocal++;
+                            }
+                            if (maxcount != -1 && (_i >= maxcount || _iLocal >= maxcount)){
+                                //player.message(Thread.getCurrentThread().getName() + " : Finished finding "+ blockName);
+                                _i = _i + _iLocal;
+                                Thread.getCurrentThread().stop();
+                            }
+                        }
+                        //finally
+                        _i = _i + _iLocal;
+                        if (_iLocal == 0) chunkMapping.put(TextedWorldPos.toText(chunk.getChunkPos()), true);
+                        Thread.getCurrentThread().stop();
+                    }
+                );
+                threads.append(searchThread);
+                _thread++;
+                _cpscounter++;
+            }
+            while (getAliveThreadCount(threads) > 0) {
+                player.messageActionBar('[Search thread] Waiting for thread stop...');
+                sleep(50);
+            }
+            player.message("[Search thread] Terminated finding "+ blockName + 'Found : '+ _i);
+            Thread.getCurrentThread().stop();
+        }
+    );
+
+};
+
+addLightLevelTask = fun (lightlevel, color){
+    lightLevelKey = 'light_' + lightlevel;
+    player.message("Now refreshing is set to : "+ Refresh + ", if you need to toggle, run /highlight toggleRefresh");
+    functionMapping.put(lightLevelKey , generatePredicateLightLevelAndSolidAtPos(lightlevel));
+    colour = VarRGB.fromRGB(colour);
+    mapping .put( functionMapping.get(lightLevelKey), color );
+    player.message("Added lightlevel spawn search task  : "+ lightLevelKey);
+};
+addLightLevelOpacityTask = fun (lightlevel, color, opacityValue){
+    lightLevelKey = 'light_' + lightlevel;
+    player.message("Now refreshing is set to : "+ Refresh + ", if you need to toggle, run /highlight toggleRefresh");
+    functionMapping.put(lightLevelKey , generatePredicateLightLevelAndSolidAtPos(lightlevel));
+    colour = VarRGB.fromRGB(colour);
+    colour.opacity = opacityValue;
+    mapping .put( functionMapping.get(lightLevelKey), color );
+    player.message("Added lightlevel spawn search task  : "+ lightLevelKey);
+};
+removeAdvance = fun (advancedKey){
+    if (functionMapping.get(advancedKey) == null){
+        return;
+    }
+    mapping.remove(functionMapping.get(advancedKey));
+    functionMapping.remove(advancedKey);
+    player.message("Removed search task  : "+ advancedKey);
+};
+suggesterRemove = fun (args...){
+    return mapping.getKeys();
+};
+suggesterRemoveBlock = fun (args...){
+    return spawnableBlockMapping.getKeys();
+};
+setStopRefresh = fun (){
+    Refresh =! Refresh;
+    player.message("Now render refresh is set to : "+ (Refresh));
+};
+setAreaTask = fun (x,y,z,ex,ey,ez){
+    startPos = new Pos(x,y,z);
+    endPos = new Pos(ex,ey,ez);
+    player.message("Area now selected from "+ startPos + " to " + endPos);
+};
+
+fun setSearchBlockColour(value){
+    Configs['searchBlockColour'] = value;
+    player.message("Set config searchBlockColour to " + value);
+}
+
+fun setSearchBlockOpacity(value){
+    Configs['searchBlockOpacity'] = value;
+    player.message("Set config searchBlockOpacity to " + value);
+}
+
+// explains examples of commands
+// example : /map -> prints out the nbt of the item in hand just for testing
+new LinearCommand([['map']], fun(){player.message(player.getHeldItem().getNbt());}).process();
+// example : /highlight sleepCheckInterval 100 -> sets the sleep check interval to 100ms
+new LinearCommand([['highlight'], ['sleepCheckInterval'], ['interval', 'Integer', 0, 1000]], setThreadSleepCheckInterval).process();
+// example : /highlight config minManualSearchY -384 -> sets the min manual search y to -384
+new LinearCommand([['highlight'], ['config'],['minManualSearchY'], ['y', 'Integer', -384, 384]], setMinWorldHeight).process();
+// example : /highlight config maxManualSearchY 384 -> sets the max manual search y to 384
+new LinearCommand([['highlight'], ['config'], ['maxManualSearchY'], ['y', 'Integer', -384, 384]], setMaxWorldHeight).process();
+// manages chunk caches
+// highlight chunkcache help -> prints out the help for chunkcache subcommand
+// example : /highlight chunkcache isCached <item> -> checks if the chunk cache is cached for the item
+// example : /highlight chunkcache clearAll -> clears all chunk caches
+// example : /highlight chunkcache save -> saves all chunk caches
+// example : /highlight chunkcache load -> loads all chunk caches
+// example : /highlight chunkcache clear <item> -> clears the chunk cache for the item
+// example : /highlight chunkcache clear -> clears all search cache
+new LinearCommand([['highlight'], ['chunkcache'], ['help']], fun() {
+    player.message("");
+    player.message("highlight chunkcache isCached <item> -> checks if the chunk cache is cached for the key");
+    player.message("highlight chunkcache clearAll -> clears all chunk caches");
+    player.message("highlight chunkcache save -> saves all chunk caches");
+    player.message("highlight chunkcache load -> loads all chunk caches");
+    player.message("highlight chunkcache clear <item> -> clears the chunk cache for the key");
+    player.message("highlight chunkcache clear -> clears all search cache");
+}).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['isCached'], ['item', 'Word',suggesterChunkCacheTask ]], isCached).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['isCached'], ['item', 'Word', suggesterChunkCacheTask ], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer']], isCached).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['clearAll']], clearChunkCacheTask).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['save']], saveSearchCacheTask).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['load']], loadSearchCacheTask).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['clear']], cleanSearchCache).process();
+new LinearCommand([['highlight'], ['chunkcache'], ['clear'], ['item', 'Word',suggesterChunkCacheTask ]], clearChunkCacheItemTask).process();
+// manual search commands
+new LinearCommand(['highlight', ['manualSearch'], ['help']], fun () {
+    // print that its help for manualSearch, Red colour prefix
+    player.message("");
+    // now print out the help for manualSearch
+    player.message("highlight manualSearch <block> -> searches for the block in the world");
+    player.message("highlight manualSearch <block> <radius> -> searches for the block in the world with the radius");
+    player.message("highlight manualSearch <block> <radius> <maxCount> -> searches for the block in the world with the radius and max count");
+    player.message("highlight manualSearch regex <maxCount> <regex> -> searches for the block in the world with the regex and max count");
+}
+).process();
+// example : /highlight manualSearch word <block> -> searches for the block in the world
+// example : /highlight manualSearch word <block> <radius> -> searches for the block in the world with the radius
+// example : /highlight manualSearch word <block> <radius> <maxCount> -> searches for the block in the world with the radius and max count
+// example : /highlight manualSearch regex <maxCount> <regex> -> searches for the block in the world with the regex and max count
+new LinearCommand([['highlight'], ['manualSearch'], ['regex'], ['radius', 'Integer', 0, 256], ['maxCount', 'Integer', -1, 1048576], ['string', 'GreedyString']], searchWithRegexTask).process();
+new LinearCommand([['highlight'], ['manualSearch'], ['word'], ['string', 'Word', DefaultSuggester.BLOCKS]], searchOnceTask).process();
+new LinearCommand([['highlight'], ['manualSearch'], ['word'], ['string', 'Word', DefaultSuggester.BLOCKS], ['radius', 'Integer', 0, 256]], searchRadiusOnceTask).process();
+new LinearCommand([['highlight'], ['manualSearch'], ['word'], ['string', 'Word', DefaultSuggester.BLOCKS], ['radius', 'Integer', 0, 256], ['maxCount', 'Integer', -1, 1048576]], searchRadiusOnceMaxTask).process();
+// Configs - searchBlockColour and searchBlockOpacity - 0~0xFFFFFF / 0~255
+// create highlight manualSearch config <option> <value>
+
+
+new LinearCommand([['highlight'], ['config'], ['help'], ['1']], fun() {
+    player.message("");
+    player.message("highlight config help 1 -> prints out the help for the config subcommand");
+    player.message("highlight config manualSearch togglePrint -> when manual search found a block, it will print out the location");
+    player.message("highlight config searchThreadCount <threadcount> -> sets the max search thread count, too many threads may cause lag");
+    player.message("highlight config manualSearch searchBlockColour <color> -> sets the search block colour");
+    player.message("highlight config manualSearch searchBlockOpacity <opacity> -> sets the search block opacity, bigger number means more 'vivid'");
+    player.message("highlight config compareOptions strategy <strategy> -> sets the strategy for compare, 'exact' or 'compare'");
+    player.message("highlight config setStrategy strategy <strategy> -> sets the strategy for search, 'async', 'lazy', 'direct' - 'async' is the fastest, 'lazy' is the slowest, 'direct' is the most accurate but laggy");
+    player.message("highlight config xThreads threadCount <threadCount> -> sets the thread count for x axis - for 'active' searching");
+    player.message("highlight config yThreads threadCount <threadCount> -> sets the thread count for y axis - for 'active' searching");
+    player.message("highlight config zThreads threadCount <threadCount> -> sets the thread count for z axis - for 'active' searching");
+}
+).process();
+// highlight config help 1 will print out the help for the config subcommand
+// example : /highlight config manualSearch togglePrint -> when manual search found a block, it will print out the location
+// example : /highlight config searchThreadCount <threadcount> -> sets the max search thread count, too many threads may cause lag
+// example : /highlight config manualSearch searchBlockColour <color> -> sets the search block colour
+// example : /highlight config manualSearch searchBlockOpacity <opacity> -> sets the search block opacity, bigger number means more 'vivid'
+// example : /highlight config compareOptions strategy <strategy> -> sets the strategy for compare, 'exact' or 'compare'
+// example : /highlight config setStrategy strategy <strategy> -> sets the strategy for search, 'async', 'lazy', 'direct' - 'async' is the fastest, 'lazy' is the slowest, 'direct' is the most accurate but laggy
+// example : /highlight config xThreads threadCount <threadCount> -> sets the thread count for x axis - for 'active' searching
+// example : /highlight config yThreads threadCount <threadCount> -> sets the thread count for y axis - for 'active' searching
+// example : /highlight config zThreads threadCount <threadCount> -> sets the thread count for z axis - for 'active' searching
+
+new LinearCommand([['highlight'], ['config'], ['manualSearch'], ['togglePrint']], setPrintLocation).process();
+new LinearCommand([['highlight'], ['config'], ['searchThreadCount'], ['threadcount', 'Integer', 1,128]], setMaxSearchThreadCount).process();
+new LinearCommand([['highlight'], ['config'], ['manualSearch'],  ['searchBlockColour'], ['color', 'Enum', Colors.type]], setSearchBlockColour).process();
+new LinearCommand([['highlight'], ['config'], ['manualSearch'],  ['searchBlockOpacity'], ['opacity', 'Integer', 0, 255]], setSearchBlockOpacity).process();
+new LinearCommand([['highlight'], ['config'], ['compareOptions'], ['strategy', 'Word', compareOptions.getKeys()]], setStrategyTask).process();
+new LinearCommand([['highlight'], ['config'], ['setStrategy'], ['strategy', 'Word', options.getKeys()]], setStrategyTask).process();
+new LinearCommand([['highlight'], ['config'], ['xThreads'], ['threadCount', 'Integer',1,16]], xThreadChangeTask).process();
+new LinearCommand([['highlight'], ['config'], ['yThreads'], ['threadCount', 'Integer',1,16]], yThreadChangeTask).process();
+new LinearCommand([['highlight'], ['config'], ['zThreads'], ['threadCount', 'Integer',1,16]], zThreadChangeTask).process();
+
+new LinearCommand([['highlight'], ['config'], ['help'], ['2']], fun() {
+    player.message("");
+    player.message("highlight config help 2 -> prints out the help for the config subcommand");
+    player.message("highlight config setXDistance <distance> -> sets the distance for x axis - for 'active' searching");
+    player.message("highlight config setYDistance <distance> -> sets the distance for y axis - for 'active' searching");
+    player.message("highlight config setZDistance <distance> -> sets the distance for z axis - for 'active' searching");
+    player.message("highlight config opacity <opacityValue> -> sets the opacity for the highlight");
+    player.message("highlight config outlinePixelWidth <width> -> sets the outline pixel width for the highlight");
+    player.message("highlight config outlineColor <color> -> sets the outline color for the highlight");
+    player.message("highlight config setRenderThroughBlocks <options> -> sets the render through blocks for the highlight");
+    player.message("highlight config setMaxDistance <distance> -> sets the max distance for the highlight, sets all XYZ distance to the same value");
+}
+).process();
+// highlight config help 2 will print out the help for the config subcommand
+// example : /highlight config setXDistance <distance> -> sets the distance for x axis - for 'active' searching
+// example : /highlight config setYDistance <distance> -> sets the distance for y axis - for 'active' searching
+// example : /highlight config setZDistance <distance> -> sets the distance for z axis - for 'active' searching
+// example : /highlight config opacity <opacityValue> -> sets the opacity for the highlight
+// example : /highlight config outlinePixelWidth <width> -> sets the outline pixel width for the highlight
+// example : /highlight config outlineColor <color> -> sets the outline color for the highlight
+// example : /highlight config setRenderThroughBlocks <options> -> sets the render through blocks for the highlight
+// example : /highlight config setMaxDistance <distance> -> sets the max distance for the highlight, sets all XYZ distance to the same value
+new LinearCommand([['highlight'], ['config'], ['setXDistance'], ['distance', 'Integer',1,255]], xdistanceTask).process();
+new LinearCommand([['highlight'], ['config'], ['setYDistance'], ['distance', 'Integer',1,255]], ydistanceTask).process();
+new LinearCommand([['highlight'], ['config'], ['setZDistance'], ['distance', 'Integer',1,255]], zdistanceTask).process();
+new LinearCommand([['highlight'], ['config'], ['opacity'], ['opacityValue', 'Integer',0,255]], setOpacityTask).process();
+new LinearCommand([['highlight'], ['config'], ['outlinePixelWidth'], ['width', 'Integer',0,30]], setOutlinePixelWidth).process();
+new LinearCommand([['highlight'], ['config'], ['outlineColor'], ['color', 'Enum', Colors.type]], setOutlineColorFromRGB).process();
+new LinearCommand([['highlight'], ['config'], ['setRenderThroughBlocks'], ['options', 'Boolean']], setRenderThroughBlocks).process();
+new LinearCommand([['highlight'], ['config'], ['setMaxDistance'], ['distance', 'Integer', 0, 128]], setMaxDistanceTask).process();
+
+new LinearCommand([['highlight'], ['config'], ['help'], ['3']], fun() {
+    player.message("");
+    player.message("highlight config help 3 -> prints out the help for the config subcommand");
+    player.message("highlight config setPlayerAroundDistance <distance> -> sets the distance for the highlight to follow the player");
+    player.message("highlight config setFixedCenter <x> <y> <z> -> sets the fixed center for the highlight");
+    player.message("highlight config setFixedCenter -> sets the fixed center for the highlight to current player position");
+    player.message("highlight config setAreaAnalyze <x> <y> <z> <ex> <ey> <ez> -> sets the area for the highlight to analyze");
+    player.message("highlight config setAreaAnalyze cancel -> cancels the area analyze");
+    player.message("highlight config disableFixedCenter -> disables the fixed center");
+    player.message("highlight config notify <string> <boolean> -> sets the notify for the highlight. It will print out position when the block is found");
+    player.message("highlight config notify <string> -> sets or removes the notify for the highlight");
+}
+).process();
+// highlight config help 3 will print out the help for the config subcommand
+// example : /highlight config setPlayerAroundDistance <distance> -> sets the distance for the highlight to follow the player
+// example : /highlight config setFixedCenter <x> <y> <z> -> sets the fixed center for the highlight
+// example : /highlight config setFixedCenter -> sets the fixed center for the highlight to current player position
+// example : /highlight config setAreaAnalyze <x> <y> <z> <ex> <ey> <ez> -> sets the area for the highlight to analyze
+// example : /highlight config setAreaAnalyze cancel -> cancels the area analyze
+// example : /highlight config disableFixedCenter -> disables the fixed center
+// example : /highlight config notify <string> <boolean> -> sets the notify for the highlight. It will print out position when the block is found
+// example : /highlight config notify <string> -> sets or removes the notify for the highlight
+new LinearCommand([['highlight'], ['config'], ['setPlayerAroundDistance'], ['distance', 'Integer', 0, 128]], setMaxAroundPlayerTask).process();
+new LinearCommand([['highlight'], ['config'], ['setFixedCenter'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer']], setCenterTask).process();
+new LinearCommand([['highlight'], ['config'], ['setFixedCenter']], setCenterFollowTask).process();
+new LinearCommand([['highlight'], ['config'], ['setAreaAnalyze'], ['x', 'Integer'],['y', 'Integer'],['z', 'Integer'], ['ex', 'Integer'],['ey', 'Integer'],['ez', 'Integer']], setAreaTask).process();
+new LinearCommand([['highlight'], ['config'], ['setAreaAnalyze'], ['cancel']], fun(){startPos =null;}).process();
+new LinearCommand([['highlight'], ['config'], ['disableFixedCenter']], centerOffTask).process();
+new LinearCommand([['highlight'], ['config'], ['notify'], ['string', 'Word', suggesterRemove], ['boolean', 'Boolean']], notifySearchTask).process();
+new LinearCommand([['highlight'], ['config'], ['notify'], ['string', 'Word', suggesterRemove]], notifySearchToggleTask).process();
+
+
+
+new LinearCommand([['highlight'], ['help'], ['basicSearch']], fun () {
+    player.message("");
+    player.message("highlight help basicSearch -> prints out the help for the highlight command");
+    // color can be WHITE or 255 255 255
+    print("Color can be form of WHITE or 255 255 255");
+    player.message("highlight add <blockName> <color> <opacity?> -> adds a highlight for the block");
+    player.message("highlight add <blockName> <property> <propertyName> <propertyValue> <color> <opacity?> -> adds a highlight for the block with the property, property is 'facing',etc...");
+    // remove command
+    player.message("highlight remove <blockName> -> removes the highlight for the block");
+}
+).process();
+// highlight help basicSearch will print out the help for the highlight command
+// highlight only works when 'refresh' is on. Enable it with highlight toggleRefresh or renderOnce
+// example : /highlight add <blockName> <property> <propertyName> <propertyValue> <color> <opacity?> -> adds a highlight for the block with the property, property is 'facing',etc...
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['property'], ['propertyName', 'Word', PropertySuggester.getProperties], ['propertyValue', 'Word', PropertySuggester.getPropertyValues], ['color', 'Enum', Colors.type], ['opacity', 'Integer', 0, 255]], addSearchAdvanceOpacityTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['property'], ['propertyName', 'Word', PropertySuggester.getProperties], ['propertyValue', 'Word', PropertySuggester.getPropertyValues], ['color', 'Enum', Colors.type]], addSearchAdvanceTask).process();
+// example : /highlight add <blockName> <color> <opacity?> -> adds a highlight for the block
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['color', 'Enum', Colors.type], ['opacity', 'Integer', 0, 255]], addSearchOpacityTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['R', 'Integer', 0, 255], ['G', 'Integer', 0, 255], ['B', 'Integer', 0, 255], ['opacity', 'Integer', 0, 255]], addSearchRGBOpacityTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['color', 'Enum', Colors.type]], addSearchTask).process();
+new LinearCommand([['highlight'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['R', 'Integer', 0, 255], ['G', 'Integer', 0, 255], ['B', 'Integer', 0, 255]], addSearchRGBTask).process();
+// example : /highlight remove <blockName> -> remove a highlight for the block
+new LinearCommand([['highlight'], ['remove'], ['string', 'Word', suggesterRemove]], removeSearchTask).process();
+
+
+
+// highlight help spawnableBlock will print out the help for the spawnableBlock command
+new LinearCommand([['highlight'], ['help'], ['spawnableBlock']], fun () {
+    player.message("");
+    player.message("highlight help spawnableBlock -> prints out the help for the spawnableBlock command");
+    player.message("highlight addSpawnableBlock <blockName> -> adds a block to the spawnable block list, use lightlevel command with this.");
+    player.message("highlight removeSpawnableBlock <blockName> -> removes a block from the spawnable block list");
+    player.message("highlight lightLevel <level> <color> <opacity?> -> adds a highlight for the light level, use addSpawnableBlock command with this.");
+    player.message("For example, you can have a highlight for light level 7, and addSpawnableBlock minecraft:stone, then it will highlight spawnable block that has stone below and that are at light level 7");
+}
+).process();
+// example : /highlight addSpawnableBlock <blockName> -> adds a block to the spawnable block list, use lightlevel command with this.
+// example : /highlight removeSpawnableBlock <blockName> -> removes a block from the spawnable block list
+// example : /highlight lightLevel <level> <color> <opacity?> -> adds a highlight for the light level, use addSpawnableBlock command with this.
+// For example, you can have a highlight for light level 7, and addSpawnableBlock minecraft:stone, then it will highlight spawnable block that has stone below and that are at light level 7
+new LinearCommand([['highlight'], ['addSpawnableBlock'], ['string', 'Word', DefaultSuggester.BLOCKS]], addSpwanableBlockTask).process();
+new LinearCommand([['highlight'], ['removeSpawnableBlock'], ['string', 'Word', suggesterRemoveBlock]], removeSpwanableBlockTask).process();
+new LinearCommand([['highlight'], ['lightLevel'], ['add'], ['level', 'Integer', 0, 15], ['color', 'Enum', Colors.type], ['opacity', 'Integer', 0, 255]], addLightLevelOpacityTask).process();
+new LinearCommand([['highlight'], ['lightLevel'], ['add'], ['level', 'Integer', 0, 15], ['color', 'Enum', Colors.type]], addLightLevelTask).process();
+// highlight help removeAdvanced will print out the help for the removeAdvanced command
+// example : /highlight removeAdvanced <key> -> dynamically removes a highlight options, created from spawnable/biome/etc options
+new LinearCommand([['highlight'], ['removeAdvanced'],['string', 'Word', functionMapping.getKeys()]], removeAdvance).process();
+
+// highlight help searchExtra will print out the help for addBlockState, addBiome command
+new LinearCommand([['highlight'], ['help'], ['searchExtra']], fun () {
+    player.message("");
+    player.message("highlight help searchExtra -> prints out the help for the searchExtra command");
+    player.message("highlight addBlockState <blockState> <color> <opacity?> -> adds a highlight for the blockState");
+    player.message("highlight addBiome <biomeName> <color> <opacity?> -> adds a highlight for the biome");
+    player.message("Biome key is hardcoded, if you need modded biome, ping @AngelBottomless on https://discord.gg/7R9SfktZxH and I will add it");
+}
+).process();
+// example : /highlight addBlockState <blockState> <color> <opacity?> -> adds a highlight for the blockState
+// usage : /highlight addBlockState minecraft:piston[facing=north] BLUE-> will highlight all pistons facing north with blue color
+new LinearCommand([['highlight'], ['addBlockState'], ['blockState', 'Block'], ['color', 'Enum', Colors.type], ['opacity', 'Integer', 0, 255]], addSearchOpacityStateTask).process();
+new LinearCommand([['highlight'], ['addBlockState'], ['blockState', 'Block'], ['color', 'Enum', Colors.type]], addSearchStateTask).process();
+// example : /highlight addBiome <biomeName> <color> <opacity?> -> adds a highlight for the biome
+// Biome key is hardcoded, if you need modded biome, ping @AngelBottomless on https://discord.gg/7R9SfktZxH and I will add it
+new LinearCommand([['highlight'], ['addBiome'], ['string', 'Word', DefaultSuggester.BIOMES], ['color', 'Enum', Colors.type]], addSearchBiomeTask).process();
+new LinearCommand([['highlight'], ['addBiome'], ['string', 'Word', DefaultSuggester.BIOMES], ['color', 'Enum', Colors.type], ['opacity', 'Integer', 0, 255]], addSearchBiomeOpacityTask).process();
+
+// highlight save/load saves and loads basic highlight options, not the advanced ones
+new LinearCommand([['highlight'], ['help'], ['save']], fun () {
+    player.message("highlight help save -> prints out the help for the save command");
+    player.message("highlight save <key> -> saves the highlight options to the key");
+    player.message("highlight load <key> -> loads the highlight options from the key");
+}
+).process();
+new LinearCommand([['highlight'], ['save']], saveListTask).process();
+new LinearCommand([['highlight'], ['load']], loadListTask).process();
+
+// highlight help will print out the help for the highlight command
+// renderOnce will render the highlight once, then disable it
+// refresh will toggle the highlight on and off
+// toggleRefresh will toggle the refresh on and off
+new LinearCommand([['highlight'], ['help']], fun () {
+    player.message("");
+    player.message("highlight help -> prints out the help for the highlight command");
+    player.message("highlight renderOnce -> render the highlight once, then disable it");
+    player.message("highlight refresh -> toggle the highlight on and off");
+    player.message("highlight toggleRefresh -> toggle the refresh on and off");
+    // show that highlight config help exists
+    player.message("highlight help config <number> -> prints out the help for the config command");
+}
+).process();
+new LinearCommand([['highlight'], ['renderOnce']], renderOnceTask).process();
+new LinearCommand([['highlight'], ['refresh']], refresh).process();
+new LinearCommand([['highlight'], ['toggleRefresh']], setStopRefresh).process();
+
+//highlightJavaPredicate(predicate);
+thread = Thread.runThreaded('highlight thread',fun (){ highlightJavaPredicateColor(predicateMap, mapping);
+    });
+//thread = Thread.runThreaded(fun (){highlightJavaPredicateColorBlock(predicateMapBlock, mapping);});
+//highlightJavaPredicateColor(predicateMap, mapping);
+hold();

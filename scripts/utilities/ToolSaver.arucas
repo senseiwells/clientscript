@@ -1,0 +1,140 @@
+import * from Minecraft;
+import * from minecraft.CommandUtils;
+
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+enabled = true;
+targetItems = Set.of('_pickaxe', '_axe', '_shovel', '_hoe', '_sword'); // vanilla tools that might be important
+threshold = 1;
+gameEvents = {}; // mapping of gameeventName : event
+
+
+new GameEvent("onDimensionChange", fun(newWorld) {
+    player = client.getPlayer();
+}).register();
+fun predicateToolDurability(itemStack : ItemStack) {
+    durability = itemStack.getDurability();
+    if (durability <= threshold) {
+        return true;
+    }
+    return false;
+}
+
+fun runSwap(targetItem) {
+    slots = player.getAllSlotsFor(targetItem.getMaterial());
+    currentSlot = player.getCurrentSlot() + 36;
+    foreach (slot : slots) {
+        if (slot == currentSlot || predicateToolDurability(player.getItemForSlot(slot))) {
+            continue;
+        }
+		if (0 <= slot-36 && slot-36  <= 8) {
+            player.setSelectedSlot(slot);
+        }
+        else {
+            player.swapSlots(currentSlot, slot);
+        }
+        return;
+    }
+    throw new Error('No available tool remaining');
+}
+
+toolMatchPredicate = fun(){
+    if (!enabled){
+        return false;
+    }
+    mainHandStack = player.getHeldItem();
+    itemId = mainHandStack.getId();
+    foreach (toolNames : targetItems) {
+        if (itemId.contains(toolNames) && predicateToolDurability(mainHandStack)) {
+            runSwap(mainHandStack);
+            return true;
+        }
+    }
+    return false;
+};
+
+
+
+onAttackEntity = new GameEvent("onAttackEntity", fun(entity) {
+    if (toolMatchPredicate()){
+        GameEvent.cancel();
+    }
+});
+onAttackEntity.register();
+gameEvents.put("onAttackEntity", onAttackEntity);
+
+
+onAttackBlock = new GameEvent("onAttackBlock" , fun(block){
+    if (toolMatchPredicate()){
+        GameEvent.cancel();
+    }
+}, true);
+onAttackBlock.register();
+gameEvents.put("onAttackBlock", onAttackBlock);
+
+
+registerNewGameEvent = fun(gameEventName) {
+    try {
+        gameEvent = new GameEvent(gameEventName, fun(args...) {
+            if (toolMatchPredicate()){
+                GameEvent.cancel();
+            }
+        }, true);
+        gameEvent.register();
+        gameEvents.put(gameEventName, gameEvent);
+        player.message('Added GameEvent check : '+ gameEventName);
+    }
+    catch (e) {
+        player.message('Cannot register GameEvent '+ gameEventName);
+    }
+};
+
+unRegisterGameEvent = fun(gameEventName) {
+    if (gameEvents.get(gameEventName) == null) {
+        return;
+    }
+    event = gameEvents.get(gameEventName);
+    event.unregister();
+    gameEvents.remove(gameEventName);
+    player.message('Unregistered GameEvent '+ gameEventName + ' from Checking Events');
+};
+
+setEnabledTask = fun(newEnabled) {
+    enabled = newEnabled;
+    player.message('Now ToolSaver is set to '+ newEnabled);
+};
+toggleTask = fun() {
+    newEnabled = !enabled;
+    setEnabledTask(newEnabled);
+};
+addToolTask = fun(toolName) {
+    targetItems.add(toolName);
+    player.message('Added tool '+ toolName + ' to checklist');
+};
+removeToolTask = fun(toolName) {
+    if (!targetItems.contains(toolName)) {
+        return;
+    }
+    targetItems.remove(toolName);
+    player.message('Removed tool '+ toolName + ' from checklist');
+};
+suggesterRemove = fun(args...) {
+    return targetItems.toList();
+};
+suggesterCurrentGameEvents = fun(args...){
+    return gameEvents.getKeys();
+};
+suggesterGameEvents = fun(args...){
+    //list of all cancellable events
+    return ['onAttackEntity', 'onUse', 'onAttack', 'onKeyRelease', 'onInteractItem', 'onInteractEntity', 'onAttackBlock',
+    'onInteractBlock', 'onKeyPress'];
+
+};
+print("ToolSaver Loaded with /toolSaver <enabled|add|remove|addGameEvent|removeGameEvent> command");
+new LinearCommand([['toolSaver'],['enabled', 'Boolean']], setEnabledTask).process();
+new LinearCommand([['toolSaver']], toggleTask).process();
+new LinearCommand([['toolSaver'],['add'], ['tool', 'Word', ['_pickaxe', '_axe', '_shovel', '_hoe', '_sword']]], addToolTask).process();
+new LinearCommand([['toolSaver'],['remove'], ['tool', 'Word', suggesterRemove]], removeToolTask).process();
+new LinearCommand([['toolSaver'],['addGameEvent'], ['cancellableGameEvent', 'Word', suggesterGameEvents]], registerNewGameEvent).process();
+new LinearCommand([['toolSaver'],['removeGameEvent'], ['cancellableGameEvent', 'Word', suggesterCurrentGameEvents]], unRegisterGameEvent).process();
+hold();

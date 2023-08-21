@@ -1,0 +1,165 @@
+import * from Minecraft;
+import Java from util.Internal;
+import * from minecraft.CommandUtils;
+import * from util.Futures;
+import * from minecraft.BoxUtils;
+import * from minecraft.PosUtils;
+import * from util.Json;
+client = MinecraftClient.getClient();
+player = client.getPlayer();
+world = client.getWorld();
+
+blacklistExact = Set.of();
+
+whitelistExact = Set.of();
+
+blacklistContains = Set.of();
+
+whitelistContains = Set.of();
+
+//Player.get().message(''+ Player.get().getHeldItem().getNbt());
+
+mode = 'blacklistContains';
+Player.get().message('Current Mode is '+ mode);
+enabled = true;
+strategyBlackListContains = fun(block:Block){
+    foreach(blockNames : blacklistContains){
+        if (block.getId().contains(blockNames)){
+            return true;
+        }
+    }
+    return false;
+};
+strategyWhiteListContains = fun(block:Block){
+    foreach(blockNames : whitelistContains){
+        if (block.getId().contains(blockNames)){
+            return false;
+        }
+    }
+    return true;
+};
+strategyBlackListExact = fun(block:Block){
+    if (block.getId().contains(blockNames)){
+        return true;
+    }
+    return false;
+};
+strategyWhiteListExact = fun(block:Block){
+    if (block.getId().contains(blockNames)){
+        return false;
+    }
+    return true;
+};
+new GameEvent("onDimensionChange", fun(newWorld) {
+    player = client.getPlayer();
+    center = player.getPos();
+    world = newWorld;
+    // Code
+});
+strategy = {
+    'blacklistContains' : strategyBlackListContains,
+    'whitelistContains' : strategyWhiteListContains,
+    'blacklistExact' : blacklistExact,
+    'whitelistExact' : whitelistExact
+};
+modes = strategy.getKeys();
+new GameEvent("onAttackBlock" , fun(block){
+    if (!enabled){
+        return;
+    }
+    if ((strategy.get(mode))(block)){
+        player.messageActionBar('Cancelled breaking '+ block);
+        GameEvent.cancel();
+    }
+}, true);
+setEnabledTask = fun(newEnabled) {
+    enabled = newEnabled;
+    player.message('Now block breaking control is set to '+ newEnabled);
+};
+toggleTask = fun() {
+    newEnabled = !enabled;
+    setEnabledTask(newEnabled);
+};
+setModeTask = fun (strategyType) {
+    if (strategy.get(strategyType) == null){
+        // invalid
+        player.message("Cannot set strategy " + strategyType);
+        return;
+    }
+    mode = strategyType;
+    player.message('Now applying mode '+ mode);
+};
+addBlacklistTask = fun (block, strategyType){
+    if (strategy.get(strategyType) == null){
+        // invalid
+        player.message("Cannot set strategy " + strategyType);
+        return;
+    }
+    if (strategyType == 'exact'){
+        addBlacklistExactTask(block);
+    }
+    else {
+        addBlacklistContainsTask(block);
+    }
+};
+addWhitelistTask = fun (block, strategyType){
+    if (strategy.get(strategyType) == null){
+        // invalid
+        player.message("Cannot set strategy " + strategyType);
+        return;
+    }
+    if (strategyType == 'exact'){
+        addWhitelistExactTask(block);
+    }
+    else {
+        addWhitelistContainsTask(block);
+    }
+};
+addBlacklistExactTask = fun (block){
+    removeAnyTask(block);
+    blacklistExact.add(block);
+    player.message('Block ' + block + ' added to blacklist(exact)');
+};
+addWhitelistExactTask = fun (block){
+    removeAnyTask(block);
+    whitelistExact.add(block);
+    player.message('Block ' + block + ' added to whitelist(exact)');
+};
+addBlacklistContainsTask = fun (block){
+    removeAnyTask(block);
+    blacklistContains.add(block);
+    player.message('Block ' + block + ' added to blacklist(contains)');
+};
+addWhitelistContainsTask = fun (block){
+    removeAnyTask(block);
+    whitelistContains.add(block);
+    player.message('Block ' + block + ' added to whitelist(contains)');
+};
+removeAnyTask = fun (blockName){
+    foreach (set : [whitelistExact, blacklistExact, whitelistContains, blacklistContains]){
+        set.remove(blockName);
+    }
+    player.message(blockName + ' removed from all settings');
+};
+
+suggesterRemove = fun (args...){
+    returnValue = [];
+    foreach (mapping : [whitelistExact, blacklistExact, whitelistContains, blacklistContains]){
+        returnValue += mapping.toList();
+    }
+    return returnValue;
+};
+suggesterStrategy = fun (args...){
+    return strategy.getKeys();
+};
+
+print("Block breaking control loaded with /break command");
+new LinearCommand([['break'],['blacklist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['blacklistExact', 'blacklistContains']]], addBlacklistTask).process();
+new LinearCommand([['break'],['whitelist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS], ['type', 'Word', ['whitelistExact', 'whitelistContains']]], addWhitelistTask).process();
+new LinearCommand([['break'],['blacklist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS]], addBlacklistContainsTask).process();
+new LinearCommand([['break'],['whitelist'], ['add'], ['string', 'Word', DefaultSuggester.BLOCKS]], addWhitelistContainsTask).process();
+new LinearCommand([['break'],['remove'], ['string', 'Word', suggesterRemove]], addWhitelistContainsTask).process();
+new LinearCommand([['break'],['mode'], ['string', 'Word', suggesterStrategy]], setModeTask).process();
+new LinearCommand([['break'],['enabled', 'Boolean']], setEnabledTask).process();
+new LinearCommand([['break']], toggleTask).process();
+hold();

@@ -1,0 +1,139 @@
+import * from Minecraft;
+import * from minecraft.CommandUtils;
+import * from util.Json;
+client = MinecraftClient.getClient();
+CONFIG = {
+    "enabled": true,
+    "interval": 20,
+    "configs": {},
+    "enchantLvlMin": 1
+};
+
+configs = {};
+currentTick = 0;
+
+saveListTask = fun(){
+   file = new File(File.getDirectory().getAbsolutePath() + '/dropList.json');
+   Json.fromMap(configs).writeToFile(file);
+   print('File written to '+ file.getAbsolutePath());
+};
+
+loadListTask = fun(){
+   file = new File(File.getDirectory().getAbsolutePath() + '/dropList.json');
+   configs = Json.fromString(file.read()).getValue();
+   print('File loaded from '+ file.getAbsolutePath());
+};
+
+dropMatching = fun(){
+    foreach(slots : range(Player.get().getTotalSlots())){
+        tryDropMatch(slots);
+    }
+};
+
+checkScreen = fun(){
+    screen = Player.get().getCurrentScreen();
+    return screen == null;
+};
+
+checkEnchant = fun(itemStack){
+    enchants = itemStack.getEnchantments();
+    foreach(enchant : enchants){
+        if (enchants.get(enchant) >= CONFIG['enchantLvlMin']){
+            return true;
+        }
+    }
+    return false;
+};
+
+tryDropMatch = fun(slotNum){
+    //except named item
+    itemStack = Player.get().getItemForSlot(slotNum);
+    if (itemStack.getNbt().get('display') != null) {
+        return;
+    }
+    if (checkEnchant(itemStack)){
+        return;
+    }
+    foreach (item : configs.getKeys()) {
+        isExact = configs.get(item);
+        if (isExact){
+            if (itemStack.getId() == item){
+                dropSlot(slotNum);
+            }
+        }
+        else {
+            if (itemStack.getId().contains(item)){
+                dropSlot(slotNum);
+            }
+        }
+    }
+};
+
+fun dropSlot(slotNum) {
+    Player.get().dropSlot(slotNum);
+}
+
+addToConfig = fun(newItem, isExact) {
+    configs.put(newItem, isExact);
+    print('Added '+ newItem + ' to drop list');
+};
+
+removeFromConfig = fun(item){
+    if (configs.get(item) != null){
+        configs.remove(item);
+        print('Removed '+ item + ' from drop list');
+    }
+};
+
+suggesterRemove = fun(args...){
+    return configs.getKeys();
+};
+setEnabledTask = fun(newEnabled) {
+    CONFIG['enabled'] = newEnabled;
+    print('Now AutoDrop is set to '+ newEnabled);
+};
+toggleTask = fun() {
+    newEnabled = !CONFIG['enabled'];
+    setEnabledTask(newEnabled);
+};
+
+setenchantLvlMinTask = fun(newMin) {
+    CONFIG['enchantLvlMin'] = newMin;
+    print("Will drop items with enchantment level < " + newMin);
+};
+
+setIntervalTask = fun(newInterval) {
+    CONFIG['interval'] = newInterval;
+    print("Will drop items every " + newInterval + " ticks");
+};
+
+new GameEvent("onPickUpItem", fun(itemStack) {
+    if (!CONFIG['enabled'] || !checkScreen()) return;
+    new MinecraftTask().waitThen(CONFIG['interval'], fun(){dropMatching();}).run();
+}).register();
+new GameEvent("onFishBite", fun(entity) {
+    if (!CONFIG['enabled'] || !checkScreen()) return;
+    dropMatching();
+}).register();
+new GameEvent("onClientTick", fun() {
+    currentTick++;
+    if (Math.mod(currentTick, CONFIG['interval']) != 0) return;
+    if (!CONFIG['enabled']|| !checkScreen()) return;
+    dropMatching();
+}).register();
+
+print("AutoDrop loaded with /autoDrop command");
+new LinearCommand([['autoDrop'],['setCooldownTick', 'Number']], setIntervalTask).process();
+new LinearCommand([['autoDrop'],['setMinEnchantTask', 'Number']], setenchantLvlMinTask).process();
+new LinearCommand([['autoDrop'],['enabled', 'Boolean']], setEnabledTask).process();
+new LinearCommand([['autoDrop']], toggleTask).process();
+new LinearCommand([['autoDrop'],['add'], ['item', 'Word', DefaultSuggester.ITEMS], ['exact', 'Boolean']], addToConfig).process();
+new LinearCommand([['autoDrop'],['remove'], ['item', 'Word', suggesterRemove]], removeFromConfig).process();
+new LinearCommand([['autoDrop'], ['save']], saveListTask).process();
+new LinearCommand([['autoDrop'], ['load']], loadListTask).process();
+hold();
+
+
+
+
+
